@@ -1,0 +1,14 @@
+PIXEL FRONTIER - COMO INICIAR
+
+WINDOWS
+1. Extraia o ZIP para uma pasta.
+2. Dê dois cliques em INICIAR_JOGO.bat.
+3. Na primeira execução, o inicializador instala as dependências automaticamente.
+4. Depois ele abre o jogo no navegador em http://127.0.0.1:5173.
+
+IMPORTANTE
+- É necessário ter o Node.js LTS instalado no Windows.
+- O arquivo client/index.html NÃO deve ser aberto diretamente com dois cliques, pois o projeto usa Vite/React/BabylonJS.
+- O index.html da raiz serve como aviso/atalho de instruções.
+
+Nas próximas execuções, basta clicar novamente em INICIAR_JOGO.bat.
