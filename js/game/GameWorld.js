@@ -842,8 +842,18 @@ export class GameWorld {
         this.loadingProgress = 0.98;
         this.loadingLabel = "ENVIANDO TEXTURAS PARA GPU";
         this.renderMenu();
-        if (typeof this.scene.whenReadyAsync === "function")
-            await this.scene.whenReadyAsync();
+
+        // Babylon pode manter scene.whenReadyAsync() pendente indefinidamente quando
+        // algum recurso GPU demora ou nunca sinaliza ready. Os arquivos já foram
+        // validados pelo AssetManager, então aguardamos somente uma janela curta.
+        // Se ela expirar, seguimos com o jogo e as texturas restantes terminam no
+        // render loop em vez de congelar a tela em 98%.
+        const gpuReady = await this.waitForSceneReady(3200);
+        this.loadingProgress = 0.995;
+        this.loadingLabel = gpuReady ? "GPU PRONTA" : "GPU EM SEGUNDO PLANO";
+        this.renderMenu();
+        await new Promise((resolve) => window.setTimeout(resolve, 80));
+
         this.loadingProgress = 1;
         this.loadingLabel = "PRONTO";
         this.renderMenu();
@@ -874,6 +884,26 @@ export class GameWorld {
             this.syncPlayerVisual();
         }
         this.securityNotice = `${getLevel(this.currentLevel).operation}: ${getLevel(this.currentLevel).objective}`;
+    }
+    async waitForSceneReady(timeoutMs = 3200) {
+        if (typeof this.scene.whenReadyAsync !== "function") return true;
+        let timer = 0;
+        try {
+            const result = await Promise.race([
+                this.scene.whenReadyAsync().then(() => true).catch((error) => {
+                    console.warn("[Pixel Frontier] Babylon readiness falhou; continuando com render progressivo.", error);
+                    return false;
+                }),
+                new Promise((resolve) => {
+                    timer = window.setTimeout(() => resolve(false), timeoutMs);
+                }),
+            ]);
+            if (!result)
+                console.warn(`[Pixel Frontier] GPU readiness excedeu ${timeoutMs}ms; fase liberada para evitar loading infinito.`);
+            return result;
+        } finally {
+            if (timer) window.clearTimeout(timer);
+        }
     }
     controlActions() { return [["left", "ESQUERDA"], ["right", "DIREITA"], ["jump", "PULAR"], ["down", "AGACHAR"], ["fire", "ATIRAR"], ["grenade", "GRANADA"], ["interact", "INTERAGIR"], ["weapon", "TROCAR ARMA"]]; }
     defaultBindingFor(action) {
