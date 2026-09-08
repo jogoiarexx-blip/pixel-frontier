@@ -1,23 +1,62 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Pixel Frontier - Iniciar Jogo</title>
-  <style>
-    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111;color:#eee;font:16px Arial,sans-serif;text-align:center}
-    main{max-width:680px;padding:32px;border:2px solid #6f7d4c;background:#1b1d19;box-shadow:0 18px 50px #0008}
-    h1{margin-top:0;color:#e6c66d;letter-spacing:2px}
-    code{background:#090a08;padding:4px 8px;border-radius:4px;color:#fff}
-    .ok{color:#a9c875;font-weight:bold}
-  </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="theme-color" content="#0a1518" />
+  <meta name="description" content="Pixel Frontier - run-and-gun militar arcade em HTML, JavaScript e CSS." />
+  <title>Pixel Frontier</title>
+  <link rel="stylesheet" href="./css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2210%22 fill=%22%230a1518%22/><path d=%22M12 39h40v9H12zM18 26h28v13H18zM25 18h14v8H25z%22 fill=%22%23e6752a%22/><circle cx=%2222%22 cy=%2249%22 r=%226%22 fill=%22%2359633a%22/><circle cx=%2242%22 cy=%2249%22 r=%226%22 fill=%22%2359633a%22/></svg>" />
+
+  <!-- BabylonJS é carregado como módulos ES diretamente do CDN. Nenhuma build/npm é necessária. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "@babylonjs/core/": "https://unpkg.com/@babylonjs/core@9.22.2/"
+    }
+  }
+  </script>
 </head>
 <body>
-<main>
-  <h1>PIXEL FRONTIER</h1>
-  <p>Este projeto usa Vite/React/BabylonJS e não pode ser iniciado corretamente apenas abrindo este arquivo pelo protocolo <code>file://</code>.</p>
-  <p class="ok">No Windows, dê dois cliques em <code>INICIAR_JOGO.bat</code>.</p>
-  <p>Na primeira execução ele prepara as dependências automaticamente. Depois, basta usar o mesmo arquivo para jogar.</p>
-</main>
+  <main id="game-shell">
+    <canvas id="game-canvas" tabindex="0" aria-label="Pixel Frontier"></canvas>
+
+    <section id="boot-screen" class="overlay boot" aria-live="polite">
+      <div class="boot-card">
+        <div class="logo-mark">PF</div>
+        <h1>PIXEL FRONTIER</h1>
+        <p id="boot-status">INICIANDO MOTOR...</p>
+        <div class="progress"><span id="boot-progress"></span></div>
+        <small>HTML + JavaScript + CSS • GitHub Pages</small>
+      </div>
+    </section>
+
+    <section id="error-screen" class="overlay error hidden" role="alert">
+      <div class="error-card">
+        <h2>ERRO AO INICIAR</h2>
+        <p id="error-message">Não foi possível carregar o jogo.</p>
+        <button id="reload-button" type="button">TENTAR NOVAMENTE</button>
+        <small>Confira sua conexão: o motor BabylonJS é carregado por CDN.</small>
+      </div>
+    </section>
+
+    <div id="touch-controls" class="touch-controls hidden" aria-label="Controles mobile">
+      <div class="dpad">
+        <button data-action="jump" aria-label="Pular">▲</button>
+        <button data-action="left" aria-label="Esquerda">◀</button>
+        <button data-action="down" aria-label="Agachar">▼</button>
+        <button data-action="right" aria-label="Direita">▶</button>
+      </div>
+      <div class="actions">
+        <button data-action="grenade" aria-label="Granada">G</button>
+        <button class="fire" data-action="fire" aria-label="Atirar">FIRE</button>
+        <button data-action="interact" aria-label="Interagir">E</button>
+        <button data-action="pause" aria-label="Pausar">Ⅱ</button>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="./js/main.js"></script>
 </body>
 </html>
