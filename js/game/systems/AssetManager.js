@@ -12,33 +12,69 @@ export const ASSET_MANIFEST = {
         3: [`${BASE}assets/boss_argo_sheet.png`],
         4: [`${BASE}assets/boss_argo_sheet.png`],
         5: [`${BASE}assets/boss_argo_sheet.png`],
+        6: [`${BASE}assets/boss_argo_sheet.png`],
+        7: [`${BASE}assets/boss_argo_sheet.png`],
+        8: [`${BASE}assets/boss_argo_sheet.png`],
+        9: [`${BASE}assets/boss_argo_sheet.png`],
+        10: [`${BASE}assets/boss_argo_sheet.png`],
+        11: [`${BASE}assets/boss_argo_sheet.png`],
+        12: [`${BASE}assets/boss_argo_sheet.png`],
     },
 };
+
+function preloadImage(url, timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        let settled = false;
+        const finish = (error) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            image.onload = null;
+            image.onerror = null;
+            error ? reject(error) : resolve(url);
+        };
+        const timer = setTimeout(() => finish(new Error(`Tempo excedido ao carregar ${url}`)), timeoutMs);
+        image.onload = () => finish();
+        image.onerror = () => finish(new Error(`Falha ao carregar ${url}`));
+        image.decoding = "async";
+        image.src = url;
+    });
+}
+
 export class AssetManager {
     loaded = new Set();
+    failed = new Set();
     async preloadLevel(level, onProgress) {
-        const queue = [...ASSET_MANIFEST.shared, ...(ASSET_MANIFEST.levels[level] ?? [])].filter((u) => !this.loaded.has(u));
+        const all = [...new Set([...ASSET_MANIFEST.shared, ...(ASSET_MANIFEST.levels[level] ?? [])])];
+        const queue = all.filter((url) => !this.loaded.has(url));
         if (queue.length === 0) {
             onProgress?.(1, "PRONTO");
             return;
         }
         let completed = 0;
-        await Promise.all(queue.map((url) => new Promise((resolve) => {
-            const image = new Image();
-            const done = () => {
+        const failures = [];
+        for (const url of queue) {
+            onProgress?.(completed / queue.length, url.split("/").pop() ?? "ASSET");
+            try {
+                await preloadImage(url);
                 this.loaded.add(url);
-                completed += 1;
-                onProgress?.(completed / queue.length, url.split("/").pop() ?? "ASSET");
-                resolve();
-            };
-            image.onload = done;
-            image.onerror = done; // fail-soft: Babylon pode tentar novamente e o loading não trava.
-            image.src = url;
-        })));
+                this.failed.delete(url);
+            } catch (error) {
+                this.failed.add(url);
+                failures.push(error instanceof Error ? error.message : String(error));
+            }
+            completed += 1;
+            onProgress?.(completed / queue.length, url.split("/").pop() ?? "ASSET");
+        }
+        if (failures.length) {
+            throw new Error(`Assets ausentes ou inválidos: ${failures.join(" | ")}`);
+        }
     }
     releaseLevel(level) {
-        // Shared fica aquecido; assets exclusivos da fase saem do conjunto ativo e serão revalidados no próximo acesso.
-        for (const url of ASSET_MANIFEST.levels[level] ?? [])
-            this.loaded.delete(url);
+        // O navegador mantém cache HTTP; removemos apenas a marca lógica de assets exclusivos.
+        for (const url of ASSET_MANIFEST.levels[level] ?? []) {
+            if (!ASSET_MANIFEST.shared.includes(url)) this.loaded.delete(url);
+        }
     }
 }

@@ -30,3 +30,13 @@ button:active { transform:translateY(1px); background:rgba(230,117,42,.62); }
 .actions .fire { width:66px; height:66px; font-size:11px; border-color:#e6752a; }
 @media (pointer:fine) and (hover:hover) { .touch-controls { display:none !important; } }
 @media (max-width:700px) { .boot-card,.error-card { padding:20px; } h1{font-size:22px}.dpad{grid-template-columns:repeat(3,50px);grid-template-rows:repeat(2,50px)}.touch-controls button{width:50px;height:50px}.actions{grid-template-columns:repeat(2,52px)}.actions .fire{width:60px;height:60px} }
+
+/* v1.3: acessibilidade, mobile e diagnóstico */
+.actions { grid-template-columns:repeat(3,58px); }
+.touch-controls button.pressed { transform:scale(.94); background:rgba(230,117,42,.74); border-color:#f2c45f; }
+.debug-hud { position:absolute; z-index:80; top:max(10px,env(safe-area-inset-top)); right:max(10px,env(safe-area-inset-right)); margin:0; padding:7px 9px; font:700 11px/1.35 monospace; color:#c9f6ef; background:rgba(0,0,0,.62); border:1px solid rgba(91,214,208,.4); pointer-events:none; white-space:pre; }
+.portrait-hint { display:none; position:absolute; z-index:18; top:max(8px,env(safe-area-inset-top)); left:50%; transform:translateX(-50%); padding:6px 10px; background:rgba(0,0,0,.55); border:1px solid rgba(242,196,95,.5); color:#f2c45f; font-size:10px; font-weight:900; letter-spacing:.06em; pointer-events:none; }
+.noscript { position:fixed; inset:0; z-index:999; display:grid; place-items:center; background:#05090b; color:#fff; font:700 18px monospace; padding:30px; text-align:center; }
+@media (pointer:coarse) and (orientation:portrait) and (max-width:700px) { .portrait-hint { display:block; } }
+@media (max-width:700px) { .actions{grid-template-columns:repeat(3,50px)} }
+@media (max-height:520px) { .dpad,.actions{bottom:max(8px,env(safe-area-inset-bottom));gap:5px}.touch-controls button{width:44px;height:44px}.dpad{grid-template-columns:repeat(3,44px);grid-template-rows:repeat(2,44px)}.actions{grid-template-columns:repeat(3,46px)}.actions .fire{width:54px;height:54px} }

@@ -1,9 +1,13 @@
-const KEY = "pixel-frontier-save-v2";
+const KEY = "pixel-frontier-save-v3";
+const LEGACY_KEYS = ["pixel-frontier-save-v2", "pixel-frontier-save-v1"];
+
 const defaults = {
-    version: 2,
+    version: 3,
     unlockedLevel: 1,
     currentLevel: 1,
     checkpointX: 2,
+    checkpointState: null,
+    selectedCharacter: "ari",
     highScores: {},
     settings: {
         quality: "auto",
@@ -13,44 +17,59 @@ const defaults = {
         difficulty: "normal",
     },
 };
+
+const clone = (value) => {
+    if (typeof structuredClone === "function") return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+};
+
 export class SaveManager {
     data;
-    constructor() {
-        this.data = this.load();
-    }
+    storageAvailable = true;
+    constructor() { this.data = this.load(); }
     load() {
-        if (typeof window === "undefined")
-            return structuredClone(defaults);
+        if (typeof window === "undefined") return clone(defaults);
         try {
-            const raw = window.localStorage.getItem(KEY);
-            if (!raw)
-                return structuredClone(defaults);
+            let raw = window.localStorage.getItem(KEY);
+            if (!raw) {
+                for (const legacy of LEGACY_KEYS) {
+                    raw = window.localStorage.getItem(legacy);
+                    if (raw) break;
+                }
+            }
+            if (!raw) return clone(defaults);
             const parsed = JSON.parse(raw);
-            return {
-                ...structuredClone(defaults),
+            const normalized = {
+                ...clone(defaults),
                 ...parsed,
+                version: 3,
                 settings: { ...defaults.settings, ...(parsed.settings ?? {}) },
                 highScores: { ...(parsed.highScores ?? {}) },
+                checkpointState: parsed.checkpointState && typeof parsed.checkpointState === "object" ? parsed.checkpointState : null,
             };
-        }
-        catch {
-            return structuredClone(defaults);
+            this.safePersist(normalized);
+            return normalized;
+        } catch {
+            this.storageAvailable = false;
+            return clone(defaults);
         }
     }
-    get snapshot() { return structuredClone(this.data); }
+    get snapshot() { return clone(this.data); }
     update(patch) {
         this.data = { ...this.data, ...patch, settings: { ...this.data.settings, ...(patch.settings ?? {}) } };
         this.persist();
     }
-    setCheckpoint(level, x) {
+    setCheckpoint(level, x, checkpointState = null) {
         this.data.currentLevel = level;
         this.data.checkpointX = x;
+        this.data.checkpointState = checkpointState ? clone(checkpointState) : null;
         this.persist();
     }
     unlock(level) {
         this.data.unlockedLevel = Math.max(this.data.unlockedLevel, level);
         this.data.currentLevel = level;
         this.data.checkpointX = 2;
+        this.data.checkpointState = null;
         this.persist();
     }
     recordScore(level, score) {
@@ -61,10 +80,17 @@ export class SaveManager {
     resetCheckpoint(level = this.data.currentLevel) {
         this.data.currentLevel = level;
         this.data.checkpointX = 2;
+        this.data.checkpointState = null;
         this.persist();
     }
-    persist() {
-        if (typeof window !== "undefined")
-            window.localStorage.setItem(KEY, JSON.stringify(this.data));
+    safePersist(data) {
+        if (typeof window === "undefined") return;
+        try {
+            window.localStorage.setItem(KEY, JSON.stringify(data));
+            this.storageAvailable = true;
+        } catch {
+            this.storageAvailable = false;
+        }
     }
+    persist() { this.safePersist(this.data); }
 }

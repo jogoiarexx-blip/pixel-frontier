@@ -4,8 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
   <meta name="theme-color" content="#0a1518" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="description" content="Pixel Frontier - run-and-gun militar arcade em HTML, JavaScript e CSS." />
-  <title>Pixel Frontier</title>
+  <title>Pixel Frontier v1.3.0</title>
   <link rel="stylesheet" href="./css/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2210%22 fill=%22%230a1518%22/><path d=%22M12 39h40v9H12zM18 26h28v13H18zM25 18h14v8H25z%22 fill=%22%23e6752a%22/><circle cx=%2222%22 cy=%2249%22 r=%226%22 fill=%22%2359633a%22/><circle cx=%2242%22 cy=%2249%22 r=%226%22 fill=%22%2359633a%22/></svg>" />
 
@@ -16,6 +19,16 @@
       "@babylonjs/core/": "https://unpkg.com/@babylonjs/core@9.22.2/"
     }
   }
+  </script>
+  <script>
+    window.__pixelFrontierModuleError = function () {
+      var boot = document.getElementById("boot-screen");
+      var error = document.getElementById("error-screen");
+      var message = document.getElementById("error-message");
+      if (boot) boot.classList.add("hidden");
+      if (error) error.classList.remove("hidden");
+      if (message) message.textContent = "Falha ao carregar os módulos do jogo/BabylonJS. Verifique a internet, o GitHub Pages e se você abriu a URL publicada — não o arquivo pelo GitHub.";
+    };
   </script>
 </head>
 <body>
@@ -36,7 +49,7 @@
       <div class="error-card">
         <h2>ERRO AO INICIAR</h2>
         <p id="error-message">Não foi possível carregar o jogo.</p>
-        <button id="reload-button" type="button">TENTAR NOVAMENTE</button>
+        <button id="reload-button" type="button" onclick="location.reload()">TENTAR NOVAMENTE</button>
         <small>Confira sua conexão: o motor BabylonJS é carregado por CDN.</small>
       </div>
     </section>
@@ -52,11 +65,16 @@
         <button data-action="grenade" aria-label="Granada">G</button>
         <button class="fire" data-action="fire" aria-label="Atirar">FIRE</button>
         <button data-action="interact" aria-label="Interagir">E</button>
+        <button data-action="weapon" aria-label="Trocar arma">WPN</button>
         <button data-action="pause" aria-label="Pausar">Ⅱ</button>
       </div>
     </div>
+
+    <pre id="debug-hud" class="debug-hud hidden" aria-hidden="true"></pre>
+    <div id="portrait-hint" class="portrait-hint" aria-hidden="true">↻ MELHOR EM MODO PAISAGEM</div>
   </main>
 
-  <script type="module" src="./js/main.js"></script>
+  <noscript><div class="noscript">Este jogo precisa de JavaScript ativado.</div></noscript>
+  <script type="module" src="./js/main.js" onerror="window.__pixelFrontierModuleError()"></script>
 </body>
 </html>

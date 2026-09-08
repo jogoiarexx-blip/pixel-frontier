@@ -9,9 +9,13 @@ const errorScreen = document.getElementById("error-screen");
 const errorMessage = document.getElementById("error-message");
 const reloadButton = document.getElementById("reload-button");
 const touchControls = document.getElementById("touch-controls");
+const debugHud = document.getElementById("debug-hud");
 
 let engine = null;
 let game = null;
+let renderFrame = null;
+let resizeTimer = 0;
+const debugEnabled = new URLSearchParams(location.search).get("debug") === "1";
 
 function setBoot(label, progress) {
   bootStatus.textContent = label;
@@ -24,6 +28,7 @@ function showError(error) {
   errorScreen.classList.remove("hidden");
   errorMessage.textContent = error instanceof Error ? error.message : String(error);
 }
+window.__pixelFrontierBootError = showError;
 
 function bindTouch() {
   const coarse = matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0;
@@ -32,10 +37,12 @@ function bindTouch() {
     const action = button.dataset.action;
     const release = (event) => {
       event?.preventDefault();
+      button.classList.remove("pressed");
       game?.virtualAction(action, false);
     };
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
+      button.classList.add("pressed");
       try { button.setPointerCapture(event.pointerId); } catch {}
       game?.virtualAction(action, true);
     });
@@ -46,27 +53,47 @@ function bindTouch() {
   }
 }
 
+function updateDebug() {
+  if (!debugEnabled || !debugHud || !engine) return;
+  debugHud.classList.remove("hidden");
+  debugHud.textContent = `FPS ${engine.getFps().toFixed(0)}\nDPR ${window.devicePixelRatio.toFixed(2)}\n${innerWidth}×${innerHeight}`;
+}
+
 async function start() {
   try {
     setBoot("CARREGANDO BABYLONJS...", 18);
-    engine = new Engine(canvas, true, {
+    engine = new Engine(canvas, false, {
       preserveDrawingBuffer: false,
-      stencil: true,
+      stencil: false,
       adaptToDeviceRatio: true,
-      powerPreference: "high-performance"
+      powerPreference: "high-performance",
+      antialias: false,
     });
     setBoot("CRIANDO CENA...", 48);
     game = await createGameScene(engine, canvas);
     setBoot("PREPARANDO MISSÃO...", 82);
-    engine.runRenderLoop(() => game.scene.render());
-    const onResize = () => engine.resize();
-    window.addEventListener("resize", onResize, { passive:true });
+    renderFrame = () => { game.scene.render(); updateDebug(); };
+    engine.runRenderLoop(renderFrame);
+
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => engine?.resize(), 30);
+    };
+    window.addEventListener("resize", onResize, { passive: true });
+    window.addEventListener("orientationchange", onResize, { passive: true });
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) engine.stopRenderLoop();
-      else engine.runRenderLoop(() => game.scene.render());
+      if (!engine || !renderFrame) return;
+      if (document.hidden) {
+        game?.suspend?.();
+        engine.stopRenderLoop(renderFrame);
+      } else {
+        engine.resize();
+        engine.runRenderLoop(renderFrame);
+      }
     });
+
     bindTouch();
-    canvas.focus();
+    canvas.focus({ preventScroll: true });
     setBoot("PRONTO", 100);
     setTimeout(() => boot.classList.add("hidden"), 220);
   } catch (error) {
@@ -74,11 +101,7 @@ async function start() {
   }
 }
 
-window.addEventListener("error", (event) => {
-  if (!game) showError(event.error || event.message);
-});
-window.addEventListener("unhandledrejection", (event) => {
-  if (!game) showError(event.reason);
-});
+window.addEventListener("error", (event) => { if (!game) showError(event.error || event.message); });
+window.addEventListener("unhandledrejection", (event) => { if (!game) showError(event.reason); });
 reloadButton.addEventListener("click", () => location.reload());
 start();

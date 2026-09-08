@@ -53,13 +53,21 @@ export class GameWorld {
     crouching = false;
     aimY = 0;
     roverHp = 12;
+    roverAvailable = true;
+    jumpLatch = false;
+    interactLatch = false;
     autoQualityTimer = 0;
     frameSamples = [];
     gamepadLatch = new Set();
     keys = new Set();
+    gamepadKeys = new Set();
+    virtualKeys = new Set();
+    levelSelectIndex = 0;
+    autoQualityMode = "medium";
     projectiles = [];
     projectilePool = [];
     combatFx = [];
+    combatFxPool = { explosion: [], hit: [], smoke: [] };
     enemies = [];
     rescues = [];
     missionVehicles = [];
@@ -83,6 +91,7 @@ export class GameWorld {
     bossPhaseSpawned = new Set();
     securityNotice = "SETOR A: ABRIR BARRICADA";
     playerHitbox = { x: 0, y: 0.74, halfWidth: 0.42, halfHeight: 0.78 };
+    crouchHitbox = { x: 0, y: 0.38, halfWidth: 0.42, halfHeight: 0.42 };
     roverHitbox = { x: 0, y: 0.18, halfWidth: 1.58, halfHeight: 0.72 };
     bossHitbox = { x: 84, y: -4.46, halfWidth: 2.55, halfHeight: 1.00 };
     isDemo;
@@ -97,10 +106,12 @@ export class GameWorld {
         this.demoTerrain = demoMode === "terrain";
         this.demoSecurity = demoMode === "security";
         const saved = this.save.snapshot;
+        this.selected = CHARACTERS[saved.selectedCharacter] ? saved.selectedCharacter : "ari";
         const candidate = qualityOverride || saved.settings.quality || "auto";
         this.quality = candidate === "auto" || candidate === "low" || candidate === "medium" || candidate === "high" ? candidate : "auto";
         this.qualityIndex = Math.max(0, QUALITY_OPTIONS.findIndex((option) => option.id === this.quality));
         this.currentLevel = Math.max(1, Math.min(LEVELS.length, saved.currentLevel || 1));
+        this.levelSelectIndex = this.currentLevel - 1;
         this.difficulty = saved.settings.difficulty;
         this.checkpointX = saved.currentLevel === this.currentLevel ? saved.checkpointX : 2;
         this.masterVolume = saved.settings.masterVolume;
@@ -335,7 +346,7 @@ export class GameWorld {
         });
     }
     applyQuality() {
-        const effective = this.quality === "auto" ? "medium" : this.quality;
+        const effective = this.quality === "auto" ? this.autoQualityMode : this.quality;
         this.mediumDetailRoot.setEnabled(effective === "medium" || effective === "high");
         this.highDetailRoot.setEnabled(effective === "high");
     }
@@ -349,34 +360,55 @@ export class GameWorld {
         this.levelThemeRoot.dispose();
         this.levelThemeRoot = new TransformNode(`level-theme-${this.currentLevel}`, this.scene);
         this.levelThemeRoot.parent = this.worldRoot;
-        const id = this.currentLevel;
-        const colors = ["#8a765d", "#69757d", "#536747", "#4e5960", "#704b42"];
-        const accent = colors[id - 1] ?? colors[0];
+        const level = getLevel(this.currentLevel);
+        const theme = level.theme ?? "village";
+        const accent = level.tint ?? "#8a765d";
         for (let i = 0; i < 12; i += 1) {
             const x = 5 + i * 7.1;
-            if (id === 2) {
+            if (theme === "bridge") {
                 rect(this.scene, `bridge-girder-${i}`, 0.34, 3.4 + (i % 2), accent, this.levelThemeRoot, x, -3.9, 1.8);
                 rect(this.scene, `bridge-rail-${i}`, 6.2, 0.16, "#9da4a5", this.levelThemeRoot, x, -2.55, 1.7);
-            }
-            else if (id === 3) {
+            } else if (theme === "jungle") {
                 rect(this.scene, `jungle-trunk-${i}`, 0.52, 3.0 + (i % 3) * 0.6, "#4b3c2d", this.levelThemeRoot, x, -3.8, 1.8);
                 rect(this.scene, `jungle-leaf-${i}`, 2.2, 1.0, accent, this.levelThemeRoot, x + (i % 2 ? 0.5 : -0.4), -1.9, 1.75);
-            }
-            else if (id === 4) {
+            } else if (theme === "base") {
                 rect(this.scene, `base-pipe-${i}`, 5.4, 0.18, accent, this.levelThemeRoot, x, -2.8 - (i % 3) * 0.65, 1.8);
                 rect(this.scene, `base-light-${i}`, 0.24, 0.24, i % 2 ? "#e85b32" : "#f2c45f", this.levelThemeRoot, x + 1.4, -2.8 - (i % 3) * 0.65, 1.7);
-            }
-            else if (id === 5) {
-                rect(this.scene, `fort-wall-${i}`, 5.8, 2.4 + (i % 2) * 0.7, accent, this.levelThemeRoot, x, -4.6, 1.85);
-                rect(this.scene, `fort-slit-${i}`, 0.74, 0.20, "#171b1d", this.levelThemeRoot, x, -3.8, 1.7);
-            }
-            else {
+            } else if (theme === "desert") {
+                rect(this.scene, `desert-dune-${i}`, 5.8, 0.5 + (i % 3) * 0.18, accent, this.levelThemeRoot, x, -5.0, 1.85);
+                rect(this.scene, `desert-rock-${i}`, 0.8 + (i % 2) * 0.5, 1.0 + (i % 3) * 0.35, "#6d4936", this.levelThemeRoot, x + 1.7, -4.55, 1.72);
+            } else if (theme === "harbor") {
+                rect(this.scene, `harbor-crane-${i}`, 0.32, 4.6, "#53616a", this.levelThemeRoot, x, -3.5, 1.8);
+                rect(this.scene, `harbor-arm-${i}`, 3.2, 0.22, accent, this.levelThemeRoot, x + 1.25, -1.5, 1.75);
+                rect(this.scene, `harbor-water-${i}`, 6.3, 0.22, "#294d5c", this.levelThemeRoot, x, -5.45, 1.9);
+            } else if (theme === "ruins") {
+                rect(this.scene, `ruins-wall-${i}`, 3.6, 2.0 + (i % 3) * 0.55, accent, this.levelThemeRoot, x, -4.4, 1.85);
+                rect(this.scene, `ruins-hole-${i}`, 0.8, 0.65, "#17191a", this.levelThemeRoot, x + 0.8, -3.8, 1.7);
+            } else if (theme === "canyon") {
+                rect(this.scene, `canyon-pillar-${i}`, 2.4 + (i % 2), 3.0 + (i % 3), accent, this.levelThemeRoot, x, -3.7, 1.85);
+                rect(this.scene, `canyon-cap-${i}`, 3.4, 0.5, "#74472f", this.levelThemeRoot, x, -1.8, 1.72);
+            } else if (theme === "snow") {
+                rect(this.scene, `snow-bank-${i}`, 5.8, 0.42, "#d7eef2", this.levelThemeRoot, x, -5.0, 1.84);
+                rect(this.scene, `snow-post-${i}`, 0.45, 2.7 + (i % 2), accent, this.levelThemeRoot, x + 1.2, -3.9, 1.74);
+            } else if (theme === "factory") {
+                rect(this.scene, `factory-stack-${i}`, 0.9, 4.8, "#4d4d48", this.levelThemeRoot, x, -3.45, 1.85);
+                rect(this.scene, `factory-belt-${i}`, 5.8, 0.28, accent, this.levelThemeRoot, x, -4.6, 1.72);
+                rect(this.scene, `factory-lamp-${i}`, 0.22, 0.22, i % 2 ? "#e85b32" : "#f2c45f", this.levelThemeRoot, x + 1.8, -2.0, 1.7);
+            } else if (theme === "airfield") {
+                rect(this.scene, `airfield-tower-${i}`, 1.15, 3.0 + (i % 2), accent, this.levelThemeRoot, x, -4.0, 1.83);
+                rect(this.scene, `airfield-light-${i}`, 0.22, 0.22, "#d94e3f", this.levelThemeRoot, x, -2.0, 1.7);
+                rect(this.scene, `airfield-runway-${i}`, 6.0, 0.14, "#92979a", this.levelThemeRoot, x, -5.25, 1.9);
+            } else if (theme === "fortress") {
+                rect(this.scene, `fort-wall-${i}`, 5.8, 2.8 + (i % 2) * 0.9, accent, this.levelThemeRoot, x, -4.4, 1.85);
+                rect(this.scene, `fort-slit-${i}`, 0.74, 0.20, "#171b1d", this.levelThemeRoot, x, -3.5, 1.7);
+                rect(this.scene, `fort-warning-${i}`, 0.25, 0.25, "#e85b32", this.levelThemeRoot, x + 1.8, -2.9, 1.69);
+            } else {
                 rect(this.scene, `village-sign-${i}`, 1.8, 0.28, accent, this.levelThemeRoot, x, -3.2, 1.8);
             }
         }
     }
     createMissionActors() {
-        this.enemies.forEach((enemy) => enemy.root.dispose());
+        this.enemies.forEach((enemy) => enemy.root.dispose(false, enemy.kind === "sentry"));
         this.rescues.forEach((rescue) => rescue.root.dispose());
         this.missionVehicles.forEach((vehicle) => vehicle.root.dispose());
         this.enemies = [];
@@ -391,6 +423,20 @@ export class GameWorld {
             ["drone", 55.0, -2.8, 48.0, 56.0], ["sentry", 61.0, -5.15, 54.0, 65.0],
             ["sentry", 65.0, -5.15, 57.0, 69.0], ["drone", 67.0, -3.1, 60.0, 68.0],
         ];
+        const extraWaves = {
+            2: [["sentry", 38.0, -5.15, 31.0, 40.0], ["drone", 58.0, -2.5, 51.0, 59.0]],
+            3: [["drone", 16.0, -2.3, 9.0, 17.0], ["sentry", 39.0, -5.15, 32.0, 41.0], ["drone", 62.5, -2.4, 56.0, 63.5]],
+            4: [["sentry", 16.0, -5.15, 10.0, 18.0], ["drone", 32.0, -2.2, 25.0, 33.0], ["sentry", 47.0, -5.15, 40.0, 49.0], ["drone", 63.0, -2.1, 56.0, 64.0]],
+            5: [["sentry", 15.5, -5.15, 9.0, 17.0], ["drone", 27.0, -2.0, 20.0, 28.0], ["sentry", 39.5, -5.15, 33.0, 41.5], ["drone", 52.0, -2.1, 45.0, 53.0], ["sentry", 63.5, -5.15, 57.0, 65.5]],
+            6: [["drone", 14.0, -2.0, 8.0, 15.0], ["sentry", 23.0, -5.15, 16.0, 25.0], ["drone", 37.0, -2.2, 30.0, 38.0], ["sentry", 48.0, -5.15, 41.0, 50.0], ["drone", 61.0, -2.0, 54.0, 62.0]],
+            7: [["sentry", 14.0, -5.15, 8.0, 16.0], ["drone", 22.0, -2.0, 15.0, 23.0], ["sentry", 35.0, -5.15, 28.0, 37.0], ["drone", 44.0, -2.2, 37.0, 45.0], ["sentry", 56.0, -5.15, 49.0, 58.0], ["drone", 65.0, -2.0, 58.0, 66.0]],
+            8: [["drone", 13.0, -1.9, 7.0, 14.0], ["sentry", 21.0, -5.15, 14.0, 23.0], ["sentry", 32.0, -5.15, 25.0, 34.0], ["drone", 41.0, -1.9, 34.0, 42.0], ["sentry", 53.0, -5.15, 46.0, 55.0], ["drone", 63.0, -1.9, 56.0, 64.0]],
+            9: [["sentry", 13.5, -5.15, 7.0, 15.0], ["drone", 20.0, -1.8, 13.0, 21.0], ["sentry", 30.0, -5.15, 23.0, 32.0], ["drone", 39.0, -1.8, 32.0, 40.0], ["sentry", 50.0, -5.15, 43.0, 52.0], ["drone", 59.0, -1.8, 52.0, 60.0], ["sentry", 66.0, -5.15, 59.0, 68.0]],
+            10: [["drone", 12.5, -1.7, 6.0, 13.5], ["sentry", 19.0, -5.15, 12.0, 21.0], ["drone", 28.0, -1.8, 21.0, 29.0], ["sentry", 37.0, -5.15, 30.0, 39.0], ["drone", 46.0, -1.7, 39.0, 47.0], ["sentry", 55.0, -5.15, 48.0, 57.0], ["drone", 64.0, -1.8, 57.0, 65.0]],
+            11: [["sentry", 12.0, -5.15, 6.0, 14.0], ["drone", 18.0, -1.6, 11.0, 19.0], ["sentry", 27.0, -5.15, 20.0, 29.0], ["drone", 35.0, -1.7, 28.0, 36.0], ["sentry", 44.0, -5.15, 37.0, 46.0], ["drone", 52.0, -1.6, 45.0, 53.0], ["sentry", 61.0, -5.15, 54.0, 63.0], ["drone", 67.0, -1.7, 60.0, 68.0]],
+            12: [["drone", 11.5, -1.6, 5.0, 12.5], ["sentry", 17.0, -5.15, 10.0, 19.0], ["drone", 25.0, -1.5, 18.0, 26.0], ["sentry", 33.0, -5.15, 26.0, 35.0], ["drone", 41.0, -1.5, 34.0, 42.0], ["sentry", 49.0, -5.15, 42.0, 51.0], ["drone", 57.0, -1.5, 50.0, 58.0], ["sentry", 64.0, -5.15, 57.0, 66.0], ["drone", 68.0, -1.5, 61.0, 69.0]],
+        };
+        specs.push(...(extraWaves[this.currentLevel] ?? []));
         specs.forEach(([kind, x, y, triggerX, entryX], index) => {
             const root = kind === "sentry" ? sentrySprite(this.scene, `sentry-${index}`) : droneSprite(this.scene, `drone-${index}`);
             root.parent = this.worldRoot;
@@ -402,7 +448,7 @@ export class GameWorld {
             const diffHp = this.difficulty === "easy" ? 0.82 : this.difficulty === "hard" ? 1.28 : 1;
             const diffFire = this.difficulty === "easy" ? 1.22 : this.difficulty === "hard" ? 0.82 : 1;
             const hp = Math.max(2, Math.round(2 * level.enemyHpScale * diffHp));
-            this.enemies.push({ root, x: startX, y, hp, maxHp: hp, cooldown: (0.7 + index * 0.14) * level.enemyFireScale * diffFire, kind, drift: index * 1.2, alive: true, active: false, triggerX, entryX, entering: true });
+            this.enemies.push({ root, x: startX, y, hp, maxHp: hp, cooldown: (0.7 + index * 0.14) * level.enemyFireScale * diffFire, fireScale: level.enemyFireScale * diffFire, kind, drift: index * 1.2, alive: true, active: false, triggerX, entryX, entering: true });
         });
         [10, 28, 52].forEach((x, index) => {
             const root = rescueSprite(this.scene, `rescue-${index}`);
@@ -425,6 +471,27 @@ export class GameWorld {
         jeepB.position.set(77, -5.10, 0);
         jeepB.setEnabled(false);
         this.missionVehicles.push({ kind: "jeep", root: jeepB, triggerX: 57.5, targetX: 67.5, active: false, completed: false, spawned: false, cooldown: 0 });
+        if (this.currentLevel >= 4) {
+            const heliB = attackHelicopterSprite(this.scene, `attack-helicopter-l${this.currentLevel}`);
+            heliB.parent = this.worldRoot;
+            heliB.position.set(74, 4.2, 0);
+            heliB.setEnabled(false);
+            this.missionVehicles.push({ kind: "helicopter", root: heliB, triggerX: 55.0, targetX: 66.0, active: false, completed: false, spawned: false, cooldown: 0.55 });
+        }
+        if (this.currentLevel >= 7) {
+            const jeepC = enemyJeepSprite(this.scene, `reinforcement-jeep-l${this.currentLevel}`);
+            jeepC.parent = this.worldRoot;
+            jeepC.position.set(52, -5.10, 0);
+            jeepC.setEnabled(false);
+            this.missionVehicles.push({ kind: "jeep", root: jeepC, triggerX: 34.0, targetX: 43.5, active: false, completed: false, spawned: false, cooldown: 0 });
+        }
+        if (this.currentLevel >= 10) {
+            const heliC = attackHelicopterSprite(this.scene, `attack-helicopter-elite-l${this.currentLevel}`);
+            heliC.parent = this.worldRoot;
+            heliC.position.set(46, 4.6, 0);
+            heliC.setEnabled(false);
+            this.missionVehicles.push({ kind: "helicopter", root: heliC, triggerX: 28.0, targetX: 39.0, active: false, completed: false, spawned: false, cooldown: 0.38 });
+        }
     }
     spawnReinforcementSoldier(x, label) {
         const root = sentrySprite(this.scene, `reinforcement-${label}-${Math.random().toString(36).slice(2)}`);
@@ -434,7 +501,7 @@ export class GameWorld {
         const diffHp = this.difficulty === "easy" ? 0.82 : this.difficulty === "hard" ? 1.28 : 1;
         const diffFire = this.difficulty === "easy" ? 1.22 : this.difficulty === "hard" ? 0.82 : 1;
         const hp = Math.max(2, Math.round(2 * level.enemyHpScale * diffHp));
-        this.enemies.push({ root, x, y: -5.15, hp, maxHp: hp, cooldown: (0.5 + Math.random() * 0.7) * level.enemyFireScale * diffFire, kind: "sentry", drift: Math.random() * 5, alive: true, active: true, triggerX: -1, entryX: x, entering: false });
+        this.enemies.push({ root, x, y: -5.15, hp, maxHp: hp, cooldown: (0.5 + Math.random() * 0.7) * level.enemyFireScale * diffFire, fireScale: level.enemyFireScale * diffFire, kind: "sentry", drift: Math.random() * 5, alive: true, active: true, triggerX: -1, entryX: x, entering: false });
     }
     updateMissionVehicles(dt) {
         for (const vehicle of this.missionVehicles) {
@@ -480,7 +547,7 @@ export class GameWorld {
                 vehicle.cooldown -= dt;
                 if (vehicle.cooldown <= 0 && Math.abs(vehicle.root.position.x - this.player.x) < 11) {
                     this.spawnProjectile(vehicle.root.position.x - 1.2, vehicle.root.position.y - 0.7, -5.5, -5.6, false, 1, true);
-                    vehicle.cooldown = 1.25;
+                    vehicle.cooldown = 1.25 * getLevel(this.currentLevel).enemyFireScale * (this.difficulty === "easy" ? 1.18 : this.difficulty === "hard" ? 0.84 : 1);
                 }
                 if (!vehicle.spawned && vehicle.root.position.x <= vehicle.targetX) {
                     vehicle.spawned = true;
@@ -542,7 +609,10 @@ export class GameWorld {
         if (next >= 0) {
             this.lastCheckpointIndex = next;
             this.checkpointX = checkpoints[next];
-            this.save.setCheckpoint(this.currentLevel, this.checkpointX);
+            this.save.setCheckpoint(this.currentLevel, this.checkpointX, {
+                score: this.player.score, rescued: this.player.rescued, grenades: this.player.grenades,
+                weapon: this.weapon, weaponAmmo: { ...this.weaponAmmo }, roverHp: this.roverHp, hasRover: this.hasRover, roverAvailable: this.roverAvailable
+            });
             this.audio.sfxPlay("checkpoint");
             this.securityNotice = `CHECKPOINT ${next + 1}/${checkpoints.length}`;
             this.player.health = CHARACTERS[this.selected].maxHealth;
@@ -553,11 +623,11 @@ export class GameWorld {
         this.projectiles = [];
         this.cameraShake = 0;
         this.bossPhaseSpawned.clear();
-        this.combatFx.forEach((fx) => fx.root.dispose());
+        this.combatFx.forEach((fx) => this.releaseCombatFx(fx));
         this.combatFx = [];
         this.selected = this.selected;
         const data = CHARACTERS[this.selected];
-        this.playerRoot.dispose();
+        this.playerRoot.dispose(false, true);
         const visual = explorerSprite(this.scene, data, `hero-${data.id}`);
         visual.parent = this.worldRoot;
         this.playerRoot = visual;
@@ -566,6 +636,7 @@ export class GameWorld {
         this.weapon = "rifle";
         this.weaponAmmo = { rifle: -1, vulcan: 0, shotgun: 0, rocket: 0, flame: 0 };
         this.roverHp = 12;
+        this.roverAvailable = true;
         this.lastCheckpointIndex = getLevel(this.currentLevel).checkpoints.filter((x) => x <= startX).length - 1;
         this.roverRoot.position.set(36, -5.15, 0);
         this.roverRoot.setEnabled(true);
@@ -579,9 +650,53 @@ export class GameWorld {
         this.resetSecurityRoute();
         this.createMissionActors();
         this.createWeaponPickups();
+        this.applyCheckpointProgress(startX);
         this.syncPlayerVisual();
     }
+    applyCheckpointProgress(startX) {
+        if (startX <= getLevel(this.currentLevel).playerStartX + 0.5)
+            return;
+        const saved = this.save.snapshot;
+        const cp = saved.currentLevel === this.currentLevel ? saved.checkpointState : null;
+        if (cp) {
+            this.player.score = Number(cp.score) || 0;
+            this.player.rescued = Number(cp.rescued) || 0;
+            this.player.grenades = Math.max(0, Number(cp.grenades) || this.player.grenades);
+            if (cp.weaponAmmo && typeof cp.weaponAmmo === "object")
+                this.weaponAmmo = { ...this.weaponAmmo, ...cp.weaponAmmo };
+            if (WEAPONS[cp.weapon] && (cp.weapon === "rifle" || this.weaponAmmo[cp.weapon] > 0))
+                this.weapon = cp.weapon;
+            this.roverHp = Math.max(0, Number(cp.roverHp) || 0);
+            this.roverAvailable = cp.roverAvailable !== false && this.roverHp > 0;
+            this.hasRover = Boolean(cp.hasRover && this.roverAvailable);
+        }
+        for (const enemy of this.enemies) {
+            if (enemy.triggerX >= 0 && enemy.triggerX < startX - 3) {
+                enemy.alive = false; enemy.active = false; enemy.root.setEnabled(false);
+            }
+        }
+        for (const rescue of this.rescues) {
+            if (rescue.x < startX - 2) { rescue.active = false; rescue.root.setEnabled(false); }
+        }
+        for (const vehicle of this.missionVehicles) {
+            if (vehicle.triggerX < startX - 3) { vehicle.active = false; vehicle.completed = true; vehicle.root.setEnabled(false); }
+        }
+        for (const pickup of this.weaponPickups) {
+            if (pickup.x < startX - 1) { pickup.active = false; pickup.root.setEnabled(false); }
+        }
+        for (const obstacle of this.obstacles) {
+            if (obstacle.box.x < startX - 4 && obstacle.destructible) { obstacle.active = false; obstacle.root.setEnabled(false); obstacle.hp = 0; }
+        }
+        this.securityDoors.forEach((door) => {
+            if (door.box.x < startX) { door.open = true; door.root.position.y = door.closedY + 5.2; door.box.y = door.closedY + 5.2; }
+        });
+        this.securitySwitches.forEach((switchNode) => {
+            if (switchNode.box.x < startX) { switchNode.activated = true; this.setPartVisible(switchNode.root, "lamp-off", false); this.setPartVisible(switchNode.root, "lamp-on", true); }
+        });
+        if (this.hasRover) this.roverRoot.setEnabled(true);
+    }
     showMenu() {
+        this.clearInputs();
         this.state = "menu";
         this.audio.stopMusic();
         const saved = this.save.snapshot;
@@ -603,7 +718,7 @@ export class GameWorld {
         this.brandMark.setEnabled(this.state !== "play");
         if (this.state === "menu") {
             const save = this.save.snapshot;
-            this.menuBoard.setText("PIXEL FRONTIER", ["CONTINUAR CAMPANHA", "MANUAL DE CAMPO", `OPÇÕES // ${QUALITY_OPTIONS[this.qualityIndex].label}`, "CONTROLES", "CRÉDITOS", `FASE LIBERADA ${save.unlockedLevel}/${LEVELS.length} // ${getLevel(this.currentLevel).name}`, "ARROWS + ENTER"], this.menuIndex);
+            this.menuBoard.setText("PIXEL FRONTIER", ["CONTINUAR CAMPANHA", "SELECIONAR OPERAÇÃO", "MANUAL DE CAMPO", `OPÇÕES // ${QUALITY_OPTIONS[this.qualityIndex].label}`, "CONTROLES", "CRÉDITOS", `FASES LIBERADAS ${save.unlockedLevel}/${LEVELS.length} // ${getLevel(this.currentLevel).name}`], this.menuIndex);
         }
         else if (this.state === "select") {
             const data = CHARACTERS[this.selected];
@@ -617,6 +732,20 @@ export class GameWorld {
                 `DIFICULDADE ${this.difficulty.toUpperCase()}   ↑/↓ ALTERA`,
                 `←/→ ${other.name}   |   ENTER: PARTIR   |   ESC: VOLTAR`,
             ]);
+        }
+        else if (this.state === "levelselect") {
+            const save = this.save.snapshot;
+            const pageSize = 6;
+            const page = Math.floor(this.levelSelectIndex / pageSize);
+            const start = page * pageSize;
+            const visibleLevels = LEVELS.slice(start, start + pageSize);
+            const rows = visibleLevels.map((level) => {
+                const unlocked = level.id <= save.unlockedLevel;
+                const best = save.highScores?.[String(level.id)] ?? 0;
+                return `${unlocked ? "■" : "□"} OP ${String(level.id).padStart(2, "0")} ${level.name}${unlocked ? `  REC ${String(best).padStart(6, "0")}` : "  BLOQUEADA"}`;
+            });
+            const localHighlight = this.levelSelectIndex - start;
+            this.menuBoard.setText(`SELECIONAR OPERAÇÃO // PÁGINA ${page + 1}/${Math.ceil(LEVELS.length / pageSize)}`, [...rows, "", "↑/↓ ESCOLHE   ENTER CONFIRMA   ESC VOLTA"], localHighlight);
         }
         else if (this.state === "manual") {
             this.menuBoard.setText("MANUAL DE CAMPO", [
@@ -664,7 +793,7 @@ export class GameWorld {
             const last = this.currentLevel >= LEVELS.length;
             this.menuBoard.setText(last ? "CAMPANHA CONCLUÍDA" : "MISSÃO CUMPRIDA", [
                 `PONTUAÇÃO ${this.player.score.toString().padStart(6, "0")}`,
-                `RESGATADOS ${this.player.rescued}/3   FASE ${this.currentLevel}/${LEVELS.length}`, last ? "A FORTALEZA FOI DESTRUÍDA." : `PRÓXIMA: ${getLevel(this.currentLevel + 1).name}`, "", last ? "ENTER: REINICIAR CAMPANHA    ESC: MENU" : "ENTER: PRÓXIMA FASE    ESC: MENU",
+                `RESGATADOS ${this.player.rescued}/3   FASE ${this.currentLevel}/${LEVELS.length}`, last ? "A FORTALEZA OMEGA FOI DESTRUÍDA." : `PRÓXIMA: ${getLevel(this.currentLevel + 1).name}`, "", last ? "ENTER: REINICIAR CAMPANHA    ESC: MENU" : "ENTER: PRÓXIMA FASE    ESC: MENU",
             ]);
         }
         else if (this.state === "lose") {
@@ -676,11 +805,16 @@ export class GameWorld {
         this.currentLevel = Math.max(1, Math.min(LEVELS.length, level));
         if (previousLevel !== this.currentLevel)
             this.assets.releaseLevel(previousLevel);
-        this.save.update({ currentLevel: this.currentLevel });
-        if (!fromCheckpoint) {
+        const savedBeforeStart = this.save.snapshot;
+        const checkpointMatches = fromCheckpoint && savedBeforeStart.currentLevel === this.currentLevel;
+        if (!checkpointMatches) {
             this.checkpointX = 2;
             this.save.resetCheckpoint(this.currentLevel);
+        } else {
+            this.checkpointX = savedBeforeStart.checkpointX || 2;
+            this.save.update({ currentLevel: this.currentLevel, selectedCharacter: this.selected });
         }
+        this.save.update({ selectedCharacter: this.selected });
         this.state = "loading";
         this.loadingProgress = 0;
         this.loadingLabel = "MANIFESTO";
@@ -691,12 +825,28 @@ export class GameWorld {
         this.previewDax.setEnabled(false);
         this.brandMark.setEnabled(true);
         this.renderMenu();
-        await this.assets.preloadLevel(this.currentLevel, (progress, label) => {
-            this.loadingProgress = progress;
-            this.loadingLabel = label;
+        this.clearInputs();
+        try {
+            await this.assets.preloadLevel(this.currentLevel, (progress, label) => {
+                this.loadingProgress = progress;
+                this.loadingLabel = label;
+                this.renderMenu();
+            });
+        } catch (error) {
+            this.loadingLabel = "ERRO DE ASSET";
             this.renderMenu();
-        });
+            throw error;
+        }
         this.resetMission();
+        this.warmCombatFxPools();
+        this.loadingProgress = 0.98;
+        this.loadingLabel = "ENVIANDO TEXTURAS PARA GPU";
+        this.renderMenu();
+        if (typeof this.scene.whenReadyAsync === "function")
+            await this.scene.whenReadyAsync();
+        this.loadingProgress = 1;
+        this.loadingLabel = "PRONTO";
+        this.renderMenu();
         this.state = "play";
         this.menuBoard.visible(false);
         this.hudBoard.visible(true);
@@ -726,28 +876,61 @@ export class GameWorld {
         this.securityNotice = `${getLevel(this.currentLevel).operation}: ${getLevel(this.currentLevel).objective}`;
     }
     controlActions() { return [["left", "ESQUERDA"], ["right", "DIREITA"], ["jump", "PULAR"], ["down", "AGACHAR"], ["fire", "ATIRAR"], ["grenade", "GRANADA"], ["interact", "INTERAGIR"], ["weapon", "TROCAR ARMA"]]; }
+    defaultBindingFor(action) {
+        return { left: "a", right: "d", jump: "w", down: "s", fire: "x", grenade: "shift", interact: "e", weapon: "q" }[action] ?? "";
+    }
+    isPressed(key) {
+        return this.keys.has(key) || this.gamepadKeys.has(key) || this.virtualKeys.has(key);
+    }
+    clearInputs() {
+        this.keys.clear();
+        this.gamepadKeys.clear();
+        this.virtualKeys.clear();
+        this.gamepadLatch.clear();
+        this.jumpLatch = false;
+        this.interactLatch = false;
+    }
+    suspendForVisibility() {
+        this.clearInputs();
+        if (this.state === "play") {
+            this.state = "pause";
+            this.menuBoard.visible(true);
+            this.hudBoard.visible(false);
+            this.renderMenu();
+        }
+        this.audio.suspend();
+    }
     canonicalForRaw(key) {
         const aliases = { left: "a", right: "d", jump: "w", down: "s", fire: "x", grenade: "shift", interact: "e", weapon: "q" };
         const found = Object.entries(this.bindings).find(([, raw]) => raw === key)?.[0];
         return found ? aliases[found] : key;
     }
-    handleKeyDown(rawKey) {
+    handleKeyDown(rawKey, repeat = false) {
+        this.audio.ensure();
         const key = rawKey.toLowerCase();
         if (this.state === "controls" && this.waitingForBinding && key !== "escape") {
+            if (repeat) return;
             const action = this.controlActions()[this.controlIndex]?.[0];
             if (action) {
+                for (const [otherAction, bound] of Object.entries(this.bindings)) {
+                    if (otherAction !== action && bound === key)
+                        this.bindings[otherAction] = this.defaultBindingFor(otherAction);
+                }
                 this.bindings[action] = key;
-                window.localStorage.setItem("pixel-frontier-bindings", JSON.stringify(this.bindings));
+                try { window.localStorage.setItem("pixel-frontier-bindings", JSON.stringify(this.bindings)); } catch {}
             }
             this.waitingForBinding = false;
             this.audio.sfxPlay("menu");
             this.renderMenu();
             return;
         }
-        if (["arrowup", "arrowdown", "arrowleft", "arrowright", "enter", "escape", "e", "q", "1", "2", "3", "4", "5", "r", "m"].includes(key) || rawKey === " ")
-            this.handleAction(key, rawKey);
+        const canonical = this.canonicalForRaw(key);
+        const oneShot = new Set(["enter", "escape", "q", "1", "2", "3", "4", "5", "r", "m"]);
+        const actionKey = canonical === "q" ? "q" : key;
+        if ((!repeat || !oneShot.has(actionKey)) && (["arrowup", "arrowdown", "arrowleft", "arrowright", "enter", "escape", "e", "q", "1", "2", "3", "4", "5", "r", "m"].includes(actionKey) || rawKey === " "))
+            this.handleAction(actionKey, rawKey);
         this.keys.add(key);
-        this.keys.add(this.canonicalForRaw(key));
+        this.keys.add(canonical);
     }
     handleKeyUp(rawKey) {
         const key = rawKey.toLowerCase();
@@ -757,7 +940,7 @@ export class GameWorld {
     handleAction(key, rawKey) {
         if (this.state === "menu") {
             if (key === "arrowup" || key === "arrowdown") {
-                this.menuIndex = (this.menuIndex + (key === "arrowup" ? 4 : 1)) % 5;
+                this.menuIndex = (this.menuIndex + (key === "arrowup" ? 5 : 1)) % 6;
                 this.renderMenu();
             }
             if (key === "enter" || rawKey === " ") {
@@ -766,24 +949,53 @@ export class GameWorld {
                     this.renderMenu();
                 }
                 if (this.menuIndex === 1) {
-                    this.state = "manual";
+                    this.state = "levelselect";
+                    this.levelSelectIndex = Math.max(0, this.currentLevel - 1);
                     this.renderMenu();
                 }
                 if (this.menuIndex === 2) {
+                    this.state = "manual";
+                    this.renderMenu();
+                }
+                if (this.menuIndex === 3) {
                     this.state = "quality";
                     this.optionsIndex = 0;
                     this.renderMenu();
                 }
-                if (this.menuIndex === 3) {
+                if (this.menuIndex === 4) {
                     this.state = "controls";
                     this.controlIndex = 0;
                     this.renderMenu();
                 }
-                if (this.menuIndex === 4) {
+                if (this.menuIndex === 5) {
                     this.state = "credits";
                     this.renderMenu();
                 }
             }
+            return;
+        }
+        if (this.state === "levelselect") {
+            const unlocked = Math.max(1, Math.min(LEVELS.length, this.save.snapshot.unlockedLevel || 1));
+            if (key === "arrowup" || key === "arrowdown") {
+                this.levelSelectIndex = (this.levelSelectIndex + (key === "arrowup" ? LEVELS.length - 1 : 1)) % LEVELS.length;
+                this.renderMenu();
+            }
+            if (key === "enter" || rawKey === " ") {
+                const level = LEVELS[this.levelSelectIndex];
+                if (level.id <= unlocked) {
+                    this.currentLevel = level.id;
+                    const saved = this.save.snapshot;
+                    this.checkpointX = saved.currentLevel === level.id ? saved.checkpointX : 2;
+                    this.state = "select";
+                    this.audio.sfxPlay("menu");
+                    this.renderMenu();
+                }
+                else {
+                    this.audio.sfxPlay("hit");
+                }
+            }
+            if (key === "escape")
+                this.showMenu();
             return;
         }
         if (this.state === "select") {
@@ -908,20 +1120,31 @@ export class GameWorld {
         }
     }
     handleVirtualAction(action, pressed) {
-        const map = { left: "arrowleft", right: "arrowright", jump: "w", fire: "x", grenade: "shift", interact: "e", down: "s" };
-        const key = map[action];
-        if (!key) {
-            if (pressed && action === "pause")
+        this.audio.ensure();
+        const menuAction = { left: "arrowleft", right: "arrowright", jump: "arrowup", down: "arrowdown", fire: "enter", interact: "enter", grenade: "escape", pause: "escape", weapon: "q" }[action];
+        if (this.state !== "play") {
+            if (pressed && menuAction)
+                this.handleAction(menuAction, menuAction === "enter" ? "Enter" : menuAction);
+            return;
+        }
+        if (action === "pause") {
+            if (pressed)
                 this.handleAction("escape", "Escape");
             return;
         }
-        if (pressed) {
-            this.keys.add(key);
-            if (["e"].includes(key))
-                this.handleAction(key, key);
+        if (action === "weapon") {
+            if (pressed)
+                this.cycleWeapon();
+            return;
         }
+        const map = { left: "arrowleft", right: "arrowright", jump: "w", fire: "x", grenade: "shift", interact: "e", down: "s" };
+        const key = map[action];
+        if (!key)
+            return;
+        if (pressed)
+            this.virtualKeys.add(key);
         else
-            this.keys.delete(key);
+            this.virtualKeys.delete(key);
     }
     availableWeapons() {
         return ["rifle", "vulcan", "shotgun", "rocket", "flame"].filter((id) => id === "rifle" || this.weaponAmmo[id] > 0);
@@ -943,54 +1166,75 @@ export class GameWorld {
         if (typeof navigator === "undefined" || !navigator.getGamepads)
             return;
         const pad = Array.from(navigator.getGamepads()).find(Boolean);
-        if (!pad)
+        if (!pad) {
+            this.gamepadKeys.clear();
+            this.gamepadLatch.clear();
             return;
+        }
         const axisX = pad.axes[0] ?? 0;
         const axisY = pad.axes[1] ?? 0;
-        const setAxis = (key, on) => on ? this.keys.add(key) : this.keys.delete(key);
-        setAxis("arrowleft", axisX < -0.25);
-        setAxis("arrowright", axisX > 0.25);
-        setAxis("arrowdown", axisY > 0.45);
-        const mappings = [[0, "w"], [2, "x"], [1, "shift"], [3, "e"]];
-        for (const [button, key] of mappings)
-            setAxis(key, Boolean(pad.buttons[button]?.pressed));
-        [8, 9].forEach((button) => {
-            const pressed = Boolean(pad.buttons[button]?.pressed);
-            if (pressed && !this.gamepadLatch.has(button)) {
-                this.gamepadLatch.add(button);
-                if (button === 9)
-                    this.handleAction("escape", "Escape");
-                else
-                    this.cycleWeapon();
+        const pressed = (index) => Boolean(pad.buttons[index]?.pressed);
+        const edge = (token, on, callback) => {
+            if (on && !this.gamepadLatch.has(token)) {
+                this.gamepadLatch.add(token);
+                callback();
+            } else if (!on) {
+                this.gamepadLatch.delete(token);
             }
-            if (!pressed)
-                this.gamepadLatch.delete(button);
-        });
+        };
+        if (this.state !== "play") {
+            this.gamepadKeys.clear();
+            edge("nav-left", axisX < -0.55 || pressed(14), () => this.handleAction("arrowleft", "ArrowLeft"));
+            edge("nav-right", axisX > 0.55 || pressed(15), () => this.handleAction("arrowright", "ArrowRight"));
+            edge("nav-up", axisY < -0.55 || pressed(12), () => this.handleAction("arrowup", "ArrowUp"));
+            edge("nav-down", axisY > 0.55 || pressed(13), () => this.handleAction("arrowdown", "ArrowDown"));
+            edge("nav-enter", pressed(0), () => this.handleAction("enter", "Enter"));
+            edge("nav-back", pressed(1) || pressed(8), () => this.handleAction("escape", "Escape"));
+            return;
+        }
+        const setAxis = (key, on) => on ? this.gamepadKeys.add(key) : this.gamepadKeys.delete(key);
+        setAxis("arrowleft", axisX < -0.25 || pressed(14));
+        setAxis("arrowright", axisX > 0.25 || pressed(15));
+        setAxis("arrowdown", axisY > 0.45 || pressed(13));
+        setAxis("w", pressed(0) || pressed(12));
+        setAxis("x", pressed(2));
+        setAxis("shift", pressed(1));
+        setAxis("e", pressed(3));
+        edge("weapon", pressed(4) || pressed(5) || pressed(8), () => this.cycleWeapon());
+        edge("pause", pressed(9), () => this.handleAction("escape", "Escape"));
     }
     update(delta) {
-        const dt = Math.min(delta, 0.035);
+        const rawDt = Math.max(0.001, Math.min(delta, 0.25));
+        const dt = Math.min(rawDt, 0.035);
         this.pollGamepad();
         this.elapsed += dt;
         if (this.quality === "auto") {
             this.autoQualityTimer += dt;
-            this.frameSamples.push(dt);
+            this.frameSamples.push(rawDt);
             if (this.frameSamples.length > 120)
                 this.frameSamples.shift();
             if (this.autoQualityTimer > 3 && this.frameSamples.length > 30) {
                 const avg = this.frameSamples.reduce((a, b) => a + b, 0) / this.frameSamples.length;
-                this.mediumDetailRoot.setEnabled(avg < 0.030);
-                this.highDetailRoot.setEnabled(avg < 0.020);
+                const fps = 1 / Math.max(0.001, avg);
+                const previous = this.autoQualityMode;
+                if (fps < 38) this.autoQualityMode = "low";
+                else if (fps < 54) this.autoQualityMode = "medium";
+                else if (fps > 58) this.autoQualityMode = "high";
+                if (previous !== this.autoQualityMode) {
+                    this.mediumDetailRoot.setEnabled(this.autoQualityMode !== "low");
+                    this.highDetailRoot.setEnabled(this.autoQualityMode === "high");
+                }
                 this.autoQualityTimer = 0;
             }
         }
-        this.positionUi();
+        this.positionUi(dt);
         this.updateQualityDecor();
         if (this.state !== "play")
             return;
         this.updateMission(dt);
     }
     updateQualityDecor() {
-        if (this.quality !== "high" && this.quality !== "auto")
+        if (this.quality !== "high" && !(this.quality === "auto" && this.autoQualityMode === "high"))
             return;
         this.dustMotes.forEach((mote) => {
             mote.mesh.position.y = mote.y + Math.sin(this.elapsed * 0.72 + mote.phase) * 0.24;
@@ -1023,7 +1267,7 @@ export class GameWorld {
             : { x: enemy.x, y: enemy.root.position.y + 0.08, halfWidth: 0.66, halfHeight: 0.88 };
     }
     activePlayerBox() {
-        const template = this.hasRover ? this.roverHitbox : this.playerHitbox;
+        const template = this.hasRover ? this.roverHitbox : this.crouching ? this.crouchHitbox : this.playerHitbox;
         return { x: this.player.x + template.x, y: this.player.y + template.y, halfWidth: template.halfWidth, halfHeight: template.halfHeight };
     }
     resetSecurityRoute() {
@@ -1046,7 +1290,7 @@ export class GameWorld {
         });
     }
     updateSecurityRoute(dt) {
-        const activationRequested = this.keys.has("e") || (this.demoSecurity && this.demoTime > 0.45 && this.demoTime < 1.2);
+        const activationRequested = this.isPressed("e") || (this.demoSecurity && this.demoTime > 0.45 && this.demoTime < 1.2);
         for (const switchNode of this.securitySwitches) {
             if (!switchNode.activated && activationRequested && this.overlaps(this.activePlayerBox(), switchNode.box)) {
                 switchNode.activated = true;
@@ -1134,7 +1378,7 @@ export class GameWorld {
             this.audio.sfxPlay("shotgun");
         }
         else {
-            this.spawnProjectile(muzzleX, muzzleY, this.player.dir * spec.speed, aim * (this.weapon === "rocket" ? 4 : 7), true, spec.damage, spec.burst);
+            this.spawnProjectile(muzzleX, muzzleY, this.player.dir * spec.speed, aim * (this.weapon === "rocket" ? 4 : 7), true, spec.damage, spec.burst, this.weapon === "rocket" ? "rocket" : this.weapon === "flame" ? "flame" : "bullet");
             this.fireTimer = this.weapon === "rifle" ? data.fireRate : spec.fireRate;
             this.audio.sfxPlay(this.weapon === "rocket" ? "rocket" : this.weapon === "vulcan" ? "heavy" : this.weapon === "flame" ? "heavy" : "shoot");
         }
@@ -1150,16 +1394,29 @@ export class GameWorld {
         this.demoTime += dt;
         const data = CHARACTERS[this.selected];
         const demoMove = this.isDemo && !this.demoTerrain && (this.demoSecurity ? this.demoTime > 1.25 && this.demoTime < 4.2 : this.demoTime < 12);
-        const moveLeft = this.keys.has("a") || this.keys.has("arrowleft");
-        const moveRight = this.keys.has("d") || this.keys.has("arrowright") || demoMove;
-        const jump = this.keys.has("w") || this.keys.has("arrowup");
-        this.crouching = (this.keys.has("s") || this.keys.has("arrowdown")) && this.player.vy === 0 && !this.hasRover;
-        this.aimY = jump && (this.keys.has("x") || this.keys.has(" ")) ? 1 : this.crouching ? -0.35 : 0;
-        const fire = this.keys.has("x") || this.keys.has(" ") || (this.isDemo && this.demoTime > 1.2);
-        const grenade = this.keys.has("shift") || (this.isDemo && this.demoTime > 4.8 && this.demoTime < 5.1);
-        const nearRover = !this.hasRover && this.overlaps(this.activePlayerBox(), { x: this.roverRoot.position.x, y: this.roverRoot.position.y - 0.28, halfWidth: 1.80, halfHeight: 0.92 });
-        if ((this.keys.has("e") || (this.isDemo && this.player.x > 34)) && nearRover)
+        const moveLeft = this.isPressed("a") || this.isPressed("arrowleft");
+        const moveRight = this.isPressed("d") || this.isPressed("arrowright") || demoMove;
+        const jumpPressed = this.isPressed("w") || this.isPressed("arrowup");
+        const jump = jumpPressed && !this.jumpLatch;
+        this.jumpLatch = jumpPressed;
+        this.crouching = (this.isPressed("s") || this.isPressed("arrowdown")) && this.player.vy === 0 && !this.hasRover;
+        const fire = this.isPressed("x") || this.isPressed(" ") || (this.isDemo && this.demoTime > 1.2);
+        this.aimY = jumpPressed && this.player.vy !== 0 && fire ? 1 : 0;
+        const grenade = this.isPressed("shift") || (this.isDemo && this.demoTime > 4.8 && this.demoTime < 5.1);
+        const interactPressed = this.isPressed("e");
+        const interact = interactPressed && !this.interactLatch;
+        this.interactLatch = interactPressed;
+        const nearRover = !this.hasRover && this.roverAvailable && this.overlaps(this.activePlayerBox(), { x: this.roverRoot.position.x, y: this.roverRoot.position.y - 0.28, halfWidth: 1.80, halfHeight: 0.92 });
+        if ((interact || (this.isDemo && this.player.x > 34)) && nearRover) {
             this.hasRover = true;
+            this.player.inRover = true;
+            this.securityNotice = "ROVER ATIVO // E PARA SAIR";
+        } else if (interact && this.hasRover) {
+            this.hasRover = false;
+            this.player.inRover = false;
+            this.roverRoot.position.set(this.player.x - this.player.dir * 1.8, -5.15, 0.1);
+            this.securityNotice = "ROVER ESTACIONADO";
+        }
         const previousX = this.player.x;
         const previousY = this.player.y;
         let speed = data.speed * (this.hasRover ? 0.92 : this.crouching ? 0.42 : 1);
@@ -1184,7 +1441,7 @@ export class GameWorld {
             this.fireCurrentWeapon(data);
         if (grenade && this.player.grenades > 0 && this.grenadeTimer <= 0) {
             this.player.grenades -= 1;
-            this.spawnProjectile(this.player.x + this.player.dir * 0.8, this.player.y + 0.8, this.player.dir * 11, 8.5, true, 5, true);
+            this.spawnProjectile(this.player.x + this.player.dir * 0.8, this.player.y + 0.8, this.player.dir * 11, 8.5, true, 5, true, "grenade");
             this.audio.sfxPlay("grenade");
             this.grenadeTimer = 0.8;
         }
@@ -1203,7 +1460,7 @@ export class GameWorld {
     }
     syncPlayerVisual() {
         this.playerRoot.position.set(this.player.x, this.player.y, 0);
-        const moving = this.keys.has("a") || this.keys.has("d") || this.keys.has("arrowleft") || this.keys.has("arrowright") || (this.isDemo && this.demoTime < 12);
+        const moving = this.isPressed("a") || this.isPressed("d") || this.isPressed("arrowleft") || this.isPressed("arrowright") || (this.isDemo && this.demoTime < 12);
         const stride = moving && this.player.vy === 0 ? Math.sin(this.elapsed * 16) : 0;
         const jumping = this.player.y > -5.13;
         const damagePulse = this.player.invincible > 0 ? (Math.floor(this.elapsed * 20) % 2 === 0 ? 1 : 0.86) : 1;
@@ -1224,8 +1481,8 @@ export class GameWorld {
             this.animatePart(this.roverRoot, "wheel-left", 0, Math.sin(this.elapsed * 18) * 0.10);
             this.animatePart(this.roverRoot, "wheel-right", 0, -Math.sin(this.elapsed * 18) * 0.10);
         }
-        else
-            this.roverRoot.position.x = 36;
+        else if (this.roverAvailable)
+            this.roverRoot.setEnabled(true);
         const bounce = this.player.vy !== 0 ? 0.08 : Math.sin(this.elapsed * 10) * 0.03;
         this.playerRoot.position.y += bounce;
     }
@@ -1281,7 +1538,7 @@ export class GameWorld {
                 const direction = this.player.x < enemy.x ? -1 : 1;
                 this.spawnProjectile(enemy.x + direction * 0.82, enemy.root.position.y + 0.25, direction * (enemy.kind === "drone" ? 10 : 8.6), 0, false, 1, false);
                 this.spawnCombatFx(enemy.x + direction * 0.92, enemy.root.position.y + 0.25, "hit");
-                enemy.cooldown = enemy.kind === "drone" ? 1.35 : 1.55;
+                enemy.cooldown = (enemy.kind === "drone" ? 1.35 : 1.55) * (enemy.fireScale ?? 1);
             }
         }
     }
@@ -1307,6 +1564,7 @@ export class GameWorld {
             return;
         const ratio = this.boss.hp / Math.max(1, this.boss.maxHp);
         const phase = ratio > 0.70 ? 1 : ratio > 0.40 ? 2 : ratio > 0.15 ? 3 : 4;
+        const bossFireScale = getLevel(this.currentLevel).enemyFireScale * (this.difficulty === "easy" ? 1.18 : this.difficulty === "hard" ? 0.82 : 1);
         const baseY = -4.68 + Math.sin(this.elapsed * (1.6 + phase * 0.18)) * 0.12;
         this.bossRoot.position.y = baseY;
         if (phase >= 2)
@@ -1335,27 +1593,39 @@ export class GameWorld {
             const direction = this.player.x < this.bossRoot.position.x ? -1 : 1;
             if (phase === 1) {
                 this.spawnProjectile(this.bossRoot.position.x + direction * -2.2, -4.5, direction * 9, 0.8, false, 1, false);
-                this.boss.cooldown = 1.15;
+                this.boss.cooldown = 1.15 * bossFireScale;
             }
             else if (phase === 2) {
                 this.spawnProjectile(this.bossRoot.position.x - 2.2, -4.15, direction * 8.5, 5.4, false, 1, true);
                 this.spawnProjectile(this.bossRoot.position.x - 1.4, -4.05, direction * 9.2, 6.4, false, 1, true);
-                this.boss.cooldown = 1.45;
+                this.boss.cooldown = 1.45 * bossFireScale;
             }
             else if (phase === 3) {
                 for (let i = -1; i <= 1; i += 1)
                     this.spawnProjectile(this.bossRoot.position.x - 2.1, -4.45 + i * 0.35, direction * (10 + i), i * 1.1, false, 1, false);
-                this.boss.cooldown = 0.82;
+                this.boss.cooldown = 0.82 * bossFireScale;
             }
             else {
                 this.spawnProjectile(this.bossRoot.position.x - 2.1, -4.3, direction * 12, Math.sin(this.elapsed * 4) * 2.4, false, 1, false);
                 if (Math.floor(this.elapsed * 2) % 2 === 0)
                     this.spawnProjectile(this.bossRoot.position.x - 1.8, -3.9, direction * 9, 6.8, false, 1, true);
-                this.boss.cooldown = 0.46;
+                this.boss.cooldown = 0.46 * bossFireScale;
             }
         }
     }
-    spawnCombatFx(x, y, kind) {
+    warmCombatFxPools() {
+        const mode = this.quality === "auto" ? this.autoQualityMode : this.quality;
+        const targets = mode === "low" ? { explosion: 3, hit: 6, smoke: 4 } : mode === "high" ? { explosion: 8, hit: 16, smoke: 10 } : { explosion: 5, hit: 10, smoke: 6 };
+        for (const [kind, target] of Object.entries(targets)) {
+            const pool = this.combatFxPool[kind] ?? (this.combatFxPool[kind] = []);
+            while (pool.length < target) {
+                const root = this.createCombatFxRoot(kind);
+                root.setEnabled(false);
+                pool.push(root);
+            }
+        }
+    }
+    createCombatFxRoot(kind) {
         const id = Math.random().toString(36).slice(2);
         const root = kind === "explosion"
             ? assetSheetSprite(this.scene, `explosion-${id}`, `./assets/explosion_sheet.png`, 10, 2.45, 2.45, -1.2)
@@ -1370,10 +1640,28 @@ export class GameWorld {
                     { tag: "smoke-b", x: 0.25, y: 0.18, width: 0.78, height: 0.78, color: "#77736d" },
                 ], -1.1);
         root.parent = this.worldRoot;
+        return root;
+    }
+    acquireCombatFx(kind) {
+        const pool = this.combatFxPool[kind] ?? (this.combatFxPool[kind] = []);
+        const root = pool.pop() ?? this.createCombatFxRoot(kind);
+        root.setEnabled(true);
+        root.scaling.setAll(1);
+        root.rotation.z = 0;
+        if (kind === "explosion") setAssetFrame(root, 0);
+        return root;
+    }
+    releaseCombatFx(fx) {
+        fx.root.setEnabled(false);
+        fx.root.scaling.setAll(1);
+        fx.root.rotation.z = 0;
+        (this.combatFxPool[fx.kind] ?? (this.combatFxPool[fx.kind] = [])).push(fx.root);
+    }
+    spawnCombatFx(x, y, kind) {
+        const root = this.acquireCombatFx(kind);
         root.position.set(x, y, 0);
         const maxLife = kind === "explosion" ? 0.48 : kind === "hit" ? 0.18 : 0.75;
-        if (kind === "explosion")
-            this.cameraShake = Math.min(0.34, this.cameraShake + 0.14);
+        if (kind === "explosion") this.cameraShake = Math.min(0.34, this.cameraShake + 0.14);
         this.combatFx.push({ root, life: maxLife, maxLife, kind });
     }
     updateCombatFx(dt) {
@@ -1384,19 +1672,15 @@ export class GameWorld {
             if (fx.kind === "explosion") {
                 setAssetFrame(fx.root, Math.min(9, Math.floor(progress * 10)));
                 fx.root.scaling.setAll(0.70 + Math.sin(Math.min(1, progress) * Math.PI) * 0.62);
-            }
-            else if (fx.kind === "hit") {
+            } else if (fx.kind === "hit") {
                 fx.root.scaling.setAll(0.7 + progress * 0.8);
                 fx.root.rotation.z += dt * 7;
-            }
-            else {
+            } else {
                 fx.root.position.y += dt * 1.4;
                 fx.root.scaling.setAll(0.7 + progress * 1.1);
             }
-            if (fx.life <= 0)
-                fx.root.dispose();
-            else
-                alive.push(fx);
+            if (fx.life <= 0) this.releaseCombatFx(fx);
+            else alive.push(fx);
         }
         this.combatFx = alive;
     }
@@ -1418,21 +1702,31 @@ export class GameWorld {
         mesh.scaling.setAll(1);
         this.projectilePool.push(mesh);
     }
-    spawnProjectile(x, y, vx, vy, ally, damage, burst) {
-        const style = `${ally ? "ally" : "enemy"}-${burst ? "burst" : "bullet"}`;
+    spawnProjectile(x, y, vx, vy, ally, damage, burst, behavior = burst ? "grenade" : "bullet") {
+        const style = `${ally ? "ally" : "enemy"}-${behavior}`;
         const mesh = this.acquireProjectileMesh(style, x, y, ally, burst);
-        this.projectiles.push({ mesh, x, y, vx, vy, life: burst ? 1.45 : 1.8, ally, damage, burst, halfWidth: burst ? 0.64 : 0.18, halfHeight: burst ? 0.64 : 0.12, hitTargets: new Set() });
+        const gravity = behavior === "grenade" ? 14 : 0;
+        const life = behavior === "flame" ? 0.55 : behavior === "rocket" ? 1.8 : burst ? 1.45 : 1.8;
+        const large = behavior === "grenade" || behavior === "rocket";
+        const flame = behavior === "flame";
+        this.projectiles.push({
+            mesh, x, y, vx, vy, life, initialLife: life, ally, damage, burst, behavior, gravity,
+            explosive: large, piercing: flame, detonated: false,
+            halfWidth: large ? 0.48 : flame ? 0.42 : 0.18, halfHeight: large ? 0.48 : flame ? 0.28 : 0.12, hitTargets: new Set()
+        });
     }
     updateProjectiles(dt) {
         const survivors = [];
         for (const projectile of this.projectiles) {
             projectile.life -= dt;
-            projectile.vy -= projectile.burst ? 14 * dt : 0;
+            projectile.vy -= projectile.gravity * dt;
             projectile.x += projectile.vx * dt;
             projectile.y += projectile.vy * dt;
             projectile.mesh.position.set(projectile.x, projectile.y, -0.9);
-            if (projectile.burst)
-                projectile.mesh.scaling.setAll(1 + (1.4 - projectile.life) * 0.45);
+            if (projectile.explosive)
+                projectile.mesh.scaling.setAll(1 + (projectile.initialLife - projectile.life) * 0.22);
+            else if (projectile.behavior === "flame")
+                projectile.mesh.scaling.setAll(1.0 + (projectile.initialLife - projectile.life) * 1.2);
             let consumed = projectile.life <= 0 || projectile.y < -5.75;
             for (const door of this.securityDoors) {
                 if (!door.open && this.overlaps(this.projectileBox(projectile), door.box)) {
@@ -1468,7 +1762,7 @@ export class GameWorld {
                         projectile.hitTargets.add(enemyKey);
                         enemy.hp -= projectile.damage;
                         this.spawnCombatFx(projectile.x, projectile.y, "hit");
-                        consumed = !projectile.burst;
+                        consumed = !projectile.piercing;
                         if (enemy.hp <= 0) {
                             enemy.alive = false;
                             enemy.root.setEnabled(false);
@@ -1487,7 +1781,7 @@ export class GameWorld {
                         this.setPartVisible(this.bossRoot, "smoke-a", true);
                         this.setPartVisible(this.bossRoot, "smoke-b", true);
                     }
-                    consumed = !projectile.burst;
+                    consumed = !projectile.piercing;
                     if (this.boss.hp <= 0) {
                         this.boss.hp = 0;
                         this.spawnCombatFx(84, -4.0, "explosion");
@@ -1502,8 +1796,14 @@ export class GameWorld {
                 consumed = true;
                 this.damagePlayer();
             }
-            if (consumed)
+            if (consumed) {
+                if (projectile.explosive && !projectile.detonated) {
+                    projectile.detonated = true;
+                    this.spawnCombatFx(projectile.x, Math.max(-5.55, projectile.y), "explosion");
+                    this.audio.sfxPlay("explosion");
+                }
                 this.releaseProjectileMesh(projectile.mesh);
+            }
             else
                 survivors.push(projectile);
         }
@@ -1521,6 +1821,8 @@ export class GameWorld {
                 this.spawnCombatFx(this.player.x + 0.8, this.player.y + 0.4, "smoke");
                 this.audio.sfxPlay("explosion");
                 this.hasRover = false;
+                this.player.inRover = false;
+                this.roverAvailable = false;
                 this.roverRoot.setEnabled(false);
                 this.roverHp = 0;
             }
@@ -1559,12 +1861,12 @@ export class GameWorld {
         this.bossMeter.root.setEnabled(this.boss.active);
         this.bossMeter.fill.scaling.x = Math.max(0, this.boss.hp / this.boss.maxHp);
     }
-    positionUi() {
+    positionUi(dt = 1 / 60) {
         const desired = Math.max(0, Math.min(this.player.x - 2.8, 75));
         const shakeX = this.cameraShake > 0 ? Math.sin(this.elapsed * 92) * this.cameraShake : 0;
         const shakeY = this.cameraShake > 0 ? Math.cos(this.elapsed * 117) * this.cameraShake * 0.65 : 0;
-        this.cameraShake = Math.max(0, this.cameraShake - 0.018);
-        this.camera.position.x += (desired - this.camera.position.x) * 0.08;
+        this.cameraShake = Math.max(0, this.cameraShake - dt * 1.08);
+        this.camera.position.x += (desired - this.camera.position.x) * (1 - Math.exp(-dt * 5.0));
         this.camera.position.y = shakeY;
         this.camera.position.x += shakeX;
         this.camera.setTarget(this.camera.position.add(new Vector3(0, 0, 10)));
@@ -1577,9 +1879,12 @@ export class GameWorld {
         this.bossMeter.root.position.y = 6.5;
     }
     dispose() {
+        this.clearInputs();
         this.projectiles.forEach((projectile) => projectile.mesh.dispose());
         this.projectilePool.forEach((mesh) => mesh.dispose());
-        this.combatFx.forEach((fx) => fx.root.dispose());
+        this.combatFx.forEach((fx) => fx.root.dispose(false, fx.kind === "explosion"));
+        for (const [kind, roots] of Object.entries(this.combatFxPool))
+            roots.forEach((root) => root.dispose(false, kind === "explosion"));
         this.weaponPickups.forEach((pickup) => pickup.root.dispose());
         this.audio.dispose();
         this.worldRoot.dispose();

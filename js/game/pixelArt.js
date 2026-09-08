@@ -126,18 +126,36 @@ export function textBoard(scene, name, width, height, position) {
         context.fillText(title, 54, compact ? 18 : 36);
         context.fillStyle = "#5bd6d0";
         context.fillRect(54, compact ? 68 : 108, 240, 8);
-        context.font = compact ? "28px monospace" : "32px monospace";
+        const baseFont = compact ? 28 : 32;
+        const minFont = compact ? 19 : 21;
+        const maxWidth = 900;
+        const drawFitted = (value, x, y) => {
+            const text = String(value ?? "");
+            let size = baseFont;
+            context.font = `${size}px monospace`;
+            while (size > minFont && context.measureText(text).width > maxWidth) {
+                size -= 1;
+                context.font = `${size}px monospace`;
+            }
+            let output = text;
+            if (context.measureText(output).width > maxWidth) {
+                while (output.length > 4 && context.measureText(`${output}…`).width > maxWidth)
+                    output = output.slice(0, -1);
+                output += "…";
+            }
+            context.fillText(output, x, y);
+        };
         lines.forEach((line, index) => {
             const y = (compact ? 96 : 150) + index * (compact ? 42 : 52);
             if (index === highlight) {
                 context.fillStyle = "#e6752a";
                 context.fillRect(38, y - 8, 900, compact ? 36 : 42);
                 context.fillStyle = "#102633";
-                context.fillText(`> ${line}`, 56, y);
+                drawFitted(`> ${line}`, 56, y);
             }
             else {
                 context.fillStyle = index > 2 ? "#8badb5" : "#f5efd4";
-                context.fillText(line, 56, y);
+                drawFitted(line, 56, y);
             }
         });
         texture.update();
