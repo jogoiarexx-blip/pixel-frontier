@@ -691,7 +691,20 @@ export class GameWorld {
             if (door.box.x < startX) { door.open = true; door.root.position.y = door.closedY + 5.2; door.box.y = door.closedY + 5.2; }
         });
         this.securitySwitches.forEach((switchNode) => {
-            if (switchNode.box.x < startX) { switchNode.activated = true; this.setPartVisible(switchNode.root, "lamp-off", false); this.setPartVisible(switchNode.root, "lamp-on", true); }
+            if (switchNode.box.x < startX) {
+                switchNode.activated = true;
+                this.setPartVisible(switchNode.root, "lamp-off", false);
+                this.setPartVisible(switchNode.root, "lamp-on", true);
+                // Se o checkpoint fica depois do console, a porta ligada a ele também
+                // precisa voltar aberta. Caso contrário o jogador renasce à frente do
+                // console com a porta fechada e não consegue reativar o circuito.
+                const linkedDoor = this.securityDoors.find((door) => door.id === switchNode.doorId);
+                if (linkedDoor) {
+                    linkedDoor.open = true;
+                    linkedDoor.root.position.y = linkedDoor.closedY + 5.4;
+                    linkedDoor.box.y = linkedDoor.root.position.y;
+                }
+            }
         });
         if (this.hasRover) this.roverRoot.setEnabled(true);
     }
@@ -1107,9 +1120,10 @@ export class GameWorld {
         if (this.state === "win") {
             if (key === "enter" || rawKey === " ") {
                 const next = this.currentLevel >= LEVELS.length ? 1 : this.currentLevel + 1;
-                this.currentLevel = next;
                 this.checkpointX = 2;
                 this.save.unlock(next);
+                // startMission recebe a nova fase sem sobrescrever currentLevel antes,
+                // permitindo liberar corretamente os assets lógicos da fase anterior.
                 void this.startMission(next, false);
             }
             if (key === "escape")
@@ -1802,7 +1816,7 @@ export class GameWorld {
                         }
                     }
                 }
-                const bossBox = { ...this.bossHitbox, y: this.bossRoot.position.y + 0.22, halfWidth: 2.32, halfHeight: 0.96 };
+                const bossBox = { ...this.bossHitbox, x: this.bossRoot.position.x, y: this.bossRoot.position.y + 0.22, halfWidth: 2.32, halfHeight: 0.96 };
                 if (this.boss.active && !projectile.hitTargets.has("argo-core") && this.overlaps(this.projectileBox(projectile), bossBox)) {
                     projectile.hitTargets.add("argo-core");
                     this.boss.hp -= projectile.damage;
