@@ -1,4 +1,4 @@
-# Pixel Frontier v1.4.0 — HTML + JavaScript + CSS
+# Pixel Frontier v1.5.0 — HTML + JavaScript + CSS
 
 Edição estática para navegador e GitHub Pages. Não usa React, TypeScript, Vite, Node, npm, pnpm nem processo de build.
 
@@ -28,4 +28,12 @@ Adicione `?debug=1` ao endereço publicado para exibir FPS, resolução e DPR.
 
 
 ## Campanha
-A versão v1.4.0 possui **12 fases/operações**, com seleção paginada, checkpoints, save e dificuldade progressiva.
+A versão v1.5.0 possui **12 fases/operações**, com seleção paginada, checkpoints, save e dificuldade progressiva.
+
+
+## Melhorias visuais v1.5.0
+- paletas mais distintas por fase
+- fundos e horizonte mais ricos por tema
+- elementos extras de cenário em camadas
+- opção de resolução interna: AUTO, 480P, 720P, 900P e 1080P
+- qualidade gráfica: AUTO, BAIXO, MÉDIO e ALTO

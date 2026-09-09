@@ -1,4 +1,12 @@
 // Pixel Frontier: dados de gameplay separados da moldura React.
+export const RESOLUTION_OPTIONS = [
+    { id: "auto", label: "AUTO", height: 0, description: "USA A TELA DISPONÍVEL E AJUSTA A ESCALA INTERNA." },
+    { id: "480p", label: "480P", height: 480, description: "LEVE PARA NOTEBOOKS E CELULARES FRACOS." },
+    { id: "720p", label: "720P", height: 720, description: "EQUILÍBRIO ENTRE NITIDEZ E DESEMPENHO." },
+    { id: "900p", label: "900P", height: 900, description: "MAIS DEFINIÇÃO SEM PESAR TANTO QUANTO 1080P." },
+    { id: "1080p", label: "1080P", height: 1080, description: "MÁXIMA NITIDEZ PARA TELAS GRANDES." },
+];
+
 export const QUALITY_OPTIONS = [
     { id: "auto", label: "AUTO", description: "AJUSTA DETALHES CONFORME DESEMPENHO E DENSIDADE DE PIXELS." },
     { id: "low", label: "BAIXO", description: "CAMADAS ESSENCIAIS. FOCO MÁXIMO EM FLUIDEZ." },

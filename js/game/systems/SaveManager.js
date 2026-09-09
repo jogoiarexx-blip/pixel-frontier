@@ -15,6 +15,7 @@ const defaults = {
         musicVolume: 0.55,
         sfxVolume: 0.8,
         difficulty: "normal",
+        resolution: "auto",
     },
 };
 

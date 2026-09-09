@@ -31,7 +31,7 @@ export async function createGameScene(engine, canvas) {
     const demoMode = query.has("demo") ? (query.get("demo") || "mission") : "";
     const debugScreen = query.get("screen") ?? "";
     const qualityOverride = query.get("quality") ?? "";
-    const world = new GameWorld(scene, camera, demoMode, debugScreen, qualityOverride);
+    const world = new GameWorld(scene, camera, engine, demoMode, debugScreen, qualityOverride);
 
     const onKeyDown = (event) => {
         if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(event.key)) event.preventDefault();
@@ -61,6 +61,7 @@ export async function createGameScene(engine, canvas) {
         scene,
         virtualAction: (action, pressed) => world.handleVirtualAction(action, pressed),
         suspend: () => world.suspendForVisibility(),
+        refreshDisplay: () => world.applyRenderProfile?.(),
         clearInputs: () => world.clearInputs(),
         dispose: () => {
             window.removeEventListener("keydown", onKeyDown);

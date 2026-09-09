@@ -3,7 +3,7 @@ import { Vector3 } from "@babylonjs/core/Maths/math.vector.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { attackHelicopterSprite, bossSprite, droneSprite, enemyJeepSprite, explorerSprite, rescueSprite, roverSprite, sentrySprite } from "./entities.js";
 import { assetSheetSprite, meter, rect, setAssetFrame, sprite, textBoard } from "./pixelArt.js";
-import { CHARACTERS, QUALITY_OPTIONS, WEAPONS } from "./types.js";
+import { CHARACTERS, QUALITY_OPTIONS, RESOLUTION_OPTIONS, WEAPONS } from "./types.js";
 import { SaveManager } from "./systems/SaveManager.js";
 import { AssetManager } from "./systems/AssetManager.js";
 import { AudioManager } from "./systems/AudioManager.js";
@@ -11,6 +11,7 @@ import { LEVELS, getLevel } from "./systems/LevelData.js";
 export class GameWorld {
     scene;
     camera;
+    engine;
     worldRoot;
     uiRoot;
     playerRoot;
@@ -32,11 +33,13 @@ export class GameWorld {
     waitingForBinding = false;
     bindings = { left: "a", right: "d", jump: "w", down: "s", fire: "x", grenade: "shift", interact: "e", weapon: "q" };
     qualityIndex = 0;
+    resolutionIndex = 0;
     optionsIndex = 0;
     masterVolume = 0.8;
     musicVolume = 0.55;
     sfxVolume = 0.8;
     quality = "auto";
+    resolution = "auto";
     save = new SaveManager();
     assets = new AssetManager();
     audio = new AudioManager();
@@ -98,9 +101,10 @@ export class GameWorld {
     demoBoss;
     demoTerrain;
     demoSecurity;
-    constructor(scene, camera, demoMode = "", debugScreen = "", qualityOverride = "") {
+    constructor(scene, camera, engine, demoMode = "", debugScreen = "", qualityOverride = "") {
         this.scene = scene;
         this.camera = camera;
+        this.engine = engine;
         this.isDemo = demoMode.length > 0;
         this.demoBoss = demoMode === "boss";
         this.demoTerrain = demoMode === "terrain";
@@ -111,6 +115,9 @@ export class GameWorld {
         this.quality = candidate === "auto" || candidate === "low" || candidate === "medium" || candidate === "high" ? candidate : "auto";
         this.qualityIndex = Math.max(0, QUALITY_OPTIONS.findIndex((option) => option.id === this.quality));
         this.currentLevel = Math.max(1, Math.min(LEVELS.length, saved.currentLevel || 1));
+        this.resolution = saved.settings.resolution || "auto";
+        this.resolutionIndex = Math.max(0, RESOLUTION_OPTIONS.findIndex((option) => option.id === this.resolution));
+        if (this.resolutionIndex < 0) { this.resolution = "auto"; this.resolutionIndex = 0; }
         this.levelSelectIndex = this.currentLevel - 1;
         this.difficulty = saved.settings.difficulty;
         this.checkpointX = saved.currentLevel === this.currentLevel ? saved.checkpointX : 2;
@@ -345,16 +352,44 @@ export class GameWorld {
             this.groundTraps.push({ id: `floor-trap-${index}`, root, box: { x, y: -5.16, halfWidth: 1.02, halfHeight: 0.34 }, cooldown: 0 });
         });
     }
+    effectiveQuality() {
+        return this.quality === "auto" ? this.autoQualityMode : this.quality;
+    }
+    applyRenderProfile() {
+        if (!this.engine)
+            return;
+        const width = Math.max(1, window.innerWidth || 1280);
+        const height = Math.max(1, window.innerHeight || 720);
+        const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+        const preset = RESOLUTION_OPTIONS.find((option) => option.id === this.resolution) ?? RESOLUTION_OPTIONS[0];
+        const effective = this.effectiveQuality();
+        let targetHeight = preset.height || Math.round(height * dpr);
+        if (preset.id === "auto") {
+            targetHeight = Math.round(height * dpr * (effective === "low" ? 0.72 : effective === "medium" ? 0.9 : 1));
+        }
+        targetHeight = Math.max(360, Math.min(Math.round(height * dpr), targetHeight));
+        const scaling = Math.max(1, (height * dpr) / targetHeight);
+        this.engine.setHardwareScalingLevel(scaling);
+        this.engine.resize();
+    }
     applyQuality() {
-        const effective = this.quality === "auto" ? this.autoQualityMode : this.quality;
+        const effective = this.effectiveQuality();
         this.mediumDetailRoot.setEnabled(effective === "medium" || effective === "high");
         this.highDetailRoot.setEnabled(effective === "high");
+        this.applyRenderProfile();
     }
     setQuality(next) {
         this.quality = next;
         this.qualityIndex = QUALITY_OPTIONS.findIndex((option) => option.id === next);
         this.save.update({ settings: { ...this.save.snapshot.settings, quality: next } });
         this.applyQuality();
+    }
+    setResolution(next) {
+        this.resolution = next;
+        this.resolutionIndex = Math.max(0, RESOLUTION_OPTIONS.findIndex((option) => option.id === next));
+        this.save.update({ settings: { ...this.save.snapshot.settings, resolution: next } });
+        this.applyRenderProfile();
+        this.renderMenu();
     }
     applyLevelTheme() {
         this.levelThemeRoot.dispose();
@@ -363,51 +398,88 @@ export class GameWorld {
         const level = getLevel(this.currentLevel);
         const theme = level.theme ?? "village";
         const accent = level.tint ?? "#8a765d";
-        for (let i = 0; i < 12; i += 1) {
-            const x = 5 + i * 7.1;
+        const palettes = {
+            village: { sky: "#61777c", haze: "#c88a55", far: "#6f5648", mid: "#8a765d", line: "#b89062", glow: "#e6c16d" },
+            bridge: { sky: "#697888", haze: "#768796", far: "#4f5861", mid: "#6f767d", line: "#afb8bc", glow: "#f1c96a" },
+            jungle: { sky: "#4f6d55", haze: "#69804f", far: "#36503b", mid: "#53683f", line: "#95a36c", glow: "#cddd76" },
+            base: { sky: "#58636b", haze: "#6d7880", far: "#3f474d", mid: "#59636a", line: "#9ba3a8", glow: "#f08d48" },
+            desert: { sky: "#8e6647", haze: "#b07843", far: "#6b4936", mid: "#915e3f", line: "#d1a56b", glow: "#f1c96a" },
+            harbor: { sky: "#496877", haze: "#426678", far: "#284652", mid: "#4f6c78", line: "#8cb4c0", glow: "#f2c45f" },
+            ruins: { sky: "#685d59", haze: "#7a6d67", far: "#4b443f", mid: "#72665f", line: "#af9b8e", glow: "#dfb76b" },
+            canyon: { sky: "#8e6046", haze: "#9a6645", far: "#6a4732", mid: "#88583e", line: "#d4a072", glow: "#f1c96a" },
+            snow: { sky: "#88a5b0", haze: "#b7d6df", far: "#5f7984", mid: "#7fa3ad", line: "#eef7fb", glow: "#fff3b0" },
+            factory: { sky: "#5f534e", haze: "#70584c", far: "#3f3935", mid: "#665450", line: "#b49477", glow: "#f08d48" },
+            airfield: { sky: "#5c6981", haze: "#74829a", far: "#404b60", mid: "#59657d", line: "#b2bcc8", glow: "#ffd06d" },
+            fortress: { sky: "#724d45", haze: "#805046", far: "#4e3430", mid: "#6e453f", line: "#bf8467", glow: "#ff9a5a" },
+        };
+        const p = palettes[theme] ?? palettes.village;
+        rect(this.scene, `theme-sky-${this.currentLevel}`, 182, 18, p.sky, this.levelThemeRoot, 70, 4.2, 4.98);
+        rect(this.scene, `theme-haze-${this.currentLevel}`, 182, 6.5, p.haze, this.levelThemeRoot, 70, -0.8, 4.97);
+        rect(this.scene, `theme-horizon-${this.currentLevel}`, 182, 1.0, p.line, this.levelThemeRoot, 70, -5.52, 2.15);
+        for (let i = 0; i < 16; i += 1) {
+            const x = i * 8.6 + 1.5;
             if (theme === "bridge") {
-                rect(this.scene, `bridge-girder-${i}`, 0.34, 3.4 + (i % 2), accent, this.levelThemeRoot, x, -3.9, 1.8);
-                rect(this.scene, `bridge-rail-${i}`, 6.2, 0.16, "#9da4a5", this.levelThemeRoot, x, -2.55, 1.7);
+                rect(this.scene, `bridge-tower-${i}`, 1.0, 5.4 + (i % 3), p.far, this.levelThemeRoot, x, -1.5, 4.72);
+                rect(this.scene, `bridge-cable-${i}`, 6.8, 0.12, p.line, this.levelThemeRoot, x + 2.2, 1.5 - (i % 2) * 0.5, 4.68);
+                rect(this.scene, `bridge-deck-${i}`, 7.2, 0.24, p.mid, this.levelThemeRoot, x, -4.8, 1.86);
             } else if (theme === "jungle") {
-                rect(this.scene, `jungle-trunk-${i}`, 0.52, 3.0 + (i % 3) * 0.6, "#4b3c2d", this.levelThemeRoot, x, -3.8, 1.8);
-                rect(this.scene, `jungle-leaf-${i}`, 2.2, 1.0, accent, this.levelThemeRoot, x + (i % 2 ? 0.5 : -0.4), -1.9, 1.75);
+                rect(this.scene, `jungle-back-${i}`, 2.8, 4.8 + (i % 4), p.far, this.levelThemeRoot, x, -1.8, 4.72);
+                rect(this.scene, `jungle-canopy-${i}`, 4.2, 1.4, accent, this.levelThemeRoot, x + (i % 2 ? 0.8 : -0.5), 0.8, 4.68);
+                rect(this.scene, `jungle-vine-${i}`, 0.14, 2.4, p.line, this.levelThemeRoot, x + 0.4, -0.6, 4.66);
             } else if (theme === "base") {
-                rect(this.scene, `base-pipe-${i}`, 5.4, 0.18, accent, this.levelThemeRoot, x, -2.8 - (i % 3) * 0.65, 1.8);
-                rect(this.scene, `base-light-${i}`, 0.24, 0.24, i % 2 ? "#e85b32" : "#f2c45f", this.levelThemeRoot, x + 1.4, -2.8 - (i % 3) * 0.65, 1.7);
+                rect(this.scene, `base-wall-${i}`, 5.8, 2.8 + (i % 2), p.far, this.levelThemeRoot, x, -3.2, 4.72);
+                rect(this.scene, `base-strip-${i}`, 5.8, 0.18, accent, this.levelThemeRoot, x, -1.8, 4.68);
+                rect(this.scene, `base-pipe-${i}`, 6.2, 0.16, p.line, this.levelThemeRoot, x, -4.2, 1.82);
             } else if (theme === "desert") {
-                rect(this.scene, `desert-dune-${i}`, 5.8, 0.5 + (i % 3) * 0.18, accent, this.levelThemeRoot, x, -5.0, 1.85);
-                rect(this.scene, `desert-rock-${i}`, 0.8 + (i % 2) * 0.5, 1.0 + (i % 3) * 0.35, "#6d4936", this.levelThemeRoot, x + 1.7, -4.55, 1.72);
+                rect(this.scene, `desert-mesa-${i}`, 6.2, 2.2 + (i % 3) * 0.8, p.far, this.levelThemeRoot, x, -2.6, 4.72);
+                rect(this.scene, `desert-dune-${i}`, 7.0, 0.8 + (i % 2) * 0.3, accent, this.levelThemeRoot, x, -5.0, 1.86);
+                rect(this.scene, `desert-rock-${i}`, 0.9 + (i % 3) * 0.35, 0.85 + (i % 2) * 0.45, p.mid, this.levelThemeRoot, x + 2.1, -4.8, 1.78);
             } else if (theme === "harbor") {
-                rect(this.scene, `harbor-crane-${i}`, 0.32, 4.6, "#53616a", this.levelThemeRoot, x, -3.5, 1.8);
-                rect(this.scene, `harbor-arm-${i}`, 3.2, 0.22, accent, this.levelThemeRoot, x + 1.25, -1.5, 1.75);
-                rect(this.scene, `harbor-water-${i}`, 6.3, 0.22, "#294d5c", this.levelThemeRoot, x, -5.45, 1.9);
+                rect(this.scene, `harbor-crane-${i}`, 0.36, 6.0, p.far, this.levelThemeRoot, x, -1.8, 4.72);
+                rect(this.scene, `harbor-arm-${i}`, 3.6, 0.18, accent, this.levelThemeRoot, x + 1.4, 0.8, 4.68);
+                rect(this.scene, `harbor-water-${i}`, 8.0, 0.26, p.mid, this.levelThemeRoot, x, -5.2, 1.82);
+                rect(this.scene, `harbor-box-${i}`, 1.0, 1.0, p.line, this.levelThemeRoot, x + 1.8, -4.65, 1.78);
             } else if (theme === "ruins") {
-                rect(this.scene, `ruins-wall-${i}`, 3.6, 2.0 + (i % 3) * 0.55, accent, this.levelThemeRoot, x, -4.4, 1.85);
-                rect(this.scene, `ruins-hole-${i}`, 0.8, 0.65, "#17191a", this.levelThemeRoot, x + 0.8, -3.8, 1.7);
+                rect(this.scene, `ruins-shell-${i}`, 5.0, 3.2 + (i % 2), p.far, this.levelThemeRoot, x, -2.9, 4.72);
+                rect(this.scene, `ruins-hole-${i}`, 0.9, 0.7, "#17191a", this.levelThemeRoot, x + 0.9, -2.6, 4.66);
+                rect(this.scene, `ruins-rubble-${i}`, 2.4, 0.34, p.mid, this.levelThemeRoot, x, -4.95, 1.82);
             } else if (theme === "canyon") {
-                rect(this.scene, `canyon-pillar-${i}`, 2.4 + (i % 2), 3.0 + (i % 3), accent, this.levelThemeRoot, x, -3.7, 1.85);
-                rect(this.scene, `canyon-cap-${i}`, 3.4, 0.5, "#74472f", this.levelThemeRoot, x, -1.8, 1.72);
+                rect(this.scene, `canyon-wall-${i}`, 4.4 + (i % 2), 5.4, p.far, this.levelThemeRoot, x, -1.8, 4.72);
+                rect(this.scene, `canyon-cap-${i}`, 5.0, 0.44, p.mid, this.levelThemeRoot, x, 0.8, 4.68);
+                rect(this.scene, `canyon-floor-${i}`, 7.2, 0.42, accent, this.levelThemeRoot, x, -5.02, 1.82);
             } else if (theme === "snow") {
-                rect(this.scene, `snow-bank-${i}`, 5.8, 0.42, "#d7eef2", this.levelThemeRoot, x, -5.0, 1.84);
-                rect(this.scene, `snow-post-${i}`, 0.45, 2.7 + (i % 2), accent, this.levelThemeRoot, x + 1.2, -3.9, 1.74);
+                rect(this.scene, `snow-ridge-${i}`, 6.4, 2.2 + (i % 3) * 0.6, p.far, this.levelThemeRoot, x, -2.6, 4.72);
+                rect(this.scene, `snow-cap-${i}`, 6.0, 0.3, "#eef7fb", this.levelThemeRoot, x, -1.4, 4.68);
+                rect(this.scene, `snow-bank-${i}`, 7.4, 0.46, "#d7eef2", this.levelThemeRoot, x, -5.04, 1.82);
+                rect(this.scene, `snow-post-${i}`, 0.18, 1.7, accent, this.levelThemeRoot, x + 2.0, -4.25, 1.76);
             } else if (theme === "factory") {
-                rect(this.scene, `factory-stack-${i}`, 0.9, 4.8, "#4d4d48", this.levelThemeRoot, x, -3.45, 1.85);
-                rect(this.scene, `factory-belt-${i}`, 5.8, 0.28, accent, this.levelThemeRoot, x, -4.6, 1.72);
-                rect(this.scene, `factory-lamp-${i}`, 0.22, 0.22, i % 2 ? "#e85b32" : "#f2c45f", this.levelThemeRoot, x + 1.8, -2.0, 1.7);
+                rect(this.scene, `factory-stack-${i}`, 1.0, 5.8, p.far, this.levelThemeRoot, x, -1.8, 4.72);
+                rect(this.scene, `factory-smoke-${i}`, 2.2, 0.8, p.haze, this.levelThemeRoot, x + 0.2, 1.4, 4.66);
+                rect(this.scene, `factory-belt-${i}`, 7.0, 0.3, accent, this.levelThemeRoot, x, -4.9, 1.82);
+                rect(this.scene, `factory-lamp-${i}`, 0.22, 0.22, p.glow, this.levelThemeRoot, x + 1.9, -2.0, 1.78);
             } else if (theme === "airfield") {
-                rect(this.scene, `airfield-tower-${i}`, 1.15, 3.0 + (i % 2), accent, this.levelThemeRoot, x, -4.0, 1.83);
-                rect(this.scene, `airfield-light-${i}`, 0.22, 0.22, "#d94e3f", this.levelThemeRoot, x, -2.0, 1.7);
-                rect(this.scene, `airfield-runway-${i}`, 6.0, 0.14, "#92979a", this.levelThemeRoot, x, -5.25, 1.9);
+                rect(this.scene, `airfield-hangar-${i}`, 5.6, 2.8 + (i % 2), p.far, this.levelThemeRoot, x, -3.0, 4.72);
+                rect(this.scene, `airfield-runway-${i}`, 7.2, 0.22, p.line, this.levelThemeRoot, x, -5.18, 1.82);
+                rect(this.scene, `airfield-light-${i}`, 0.24, 0.24, "#d94e3f", this.levelThemeRoot, x + 1.6, -4.68, 1.78);
             } else if (theme === "fortress") {
-                rect(this.scene, `fort-wall-${i}`, 5.8, 2.8 + (i % 2) * 0.9, accent, this.levelThemeRoot, x, -4.4, 1.85);
-                rect(this.scene, `fort-slit-${i}`, 0.74, 0.20, "#171b1d", this.levelThemeRoot, x, -3.5, 1.7);
-                rect(this.scene, `fort-warning-${i}`, 0.25, 0.25, "#e85b32", this.levelThemeRoot, x + 1.8, -2.9, 1.69);
+                rect(this.scene, `fort-wall-${i}`, 6.0, 3.8 + (i % 2), p.far, this.levelThemeRoot, x, -2.6, 4.72);
+                rect(this.scene, `fort-rim-${i}`, 6.0, 0.2, accent, this.levelThemeRoot, x, -0.6, 4.68);
+                rect(this.scene, `fort-slit-${i}`, 0.78, 0.2, "#171b1d", this.levelThemeRoot, x - 0.6, -2.0, 4.66);
+                rect(this.scene, `fort-warning-${i}`, 0.25, 0.25, p.glow, this.levelThemeRoot, x + 1.8, -1.5, 4.64);
             } else {
-                rect(this.scene, `village-sign-${i}`, 1.8, 0.28, accent, this.levelThemeRoot, x, -3.2, 1.8);
+                rect(this.scene, `village-house-${i}`, 5.2, 2.8 + (i % 2), p.far, this.levelThemeRoot, x, -3.1, 4.72);
+                rect(this.scene, `village-roof-${i}`, 5.0, 0.22, p.mid, this.levelThemeRoot, x - 0.2, -1.6, 4.68);
+                rect(this.scene, `village-shack-${i}`, 2.0, 1.2, accent, this.levelThemeRoot, x + 2.1, -4.2, 1.82);
             }
+        }
+        for (let i = 0; i < 10; i += 1) {
+            const x = 6 + i * 14.2;
+            rect(this.scene, `theme-foreground-${this.currentLevel}-${i}`, 4.8, 0.18, p.line, this.levelThemeRoot, x, -5.72, 0.6);
+            rect(this.scene, `theme-beacon-${this.currentLevel}-${i}`, 0.16, 0.16, p.glow, this.levelThemeRoot, x + 1.1, -4.8, 0.58);
         }
     }
     createMissionActors() {
+
         this.enemies.forEach((enemy) => enemy.root.dispose(false, enemy.kind === "sentry"));
         this.rescues.forEach((rescue) => rescue.root.dispose());
         this.missionVehicles.forEach((vehicle) => vehicle.root.dispose());
@@ -769,11 +841,11 @@ export class GameWorld {
         else if (this.state === "quality") {
             this.menuBoard.setText("OPÇÕES", [
                 `GRÁFICOS        ${QUALITY_OPTIONS[this.qualityIndex].label}`,
+                `RESOLUÇÃO       ${RESOLUTION_OPTIONS[this.resolutionIndex].label}`,
                 `VOLUME MASTER   ${Math.round(this.masterVolume * 100)}%`,
                 `MÚSICA           ${Math.round(this.musicVolume * 100)}%`,
                 `EFEITOS          ${Math.round(this.sfxVolume * 100)}%`,
                 `DIFICULDADE      ${this.difficulty.toUpperCase()}`,
-                "",
                 "↑/↓ ITEM   ←/→ AJUSTA   ENTER SALVA   ESC VOLTA",
             ], this.optionsIndex);
         }
@@ -1061,7 +1133,7 @@ export class GameWorld {
         }
         if (this.state === "quality") {
             if (key === "arrowup" || key === "arrowdown") {
-                this.optionsIndex = (this.optionsIndex + (key === "arrowup" ? 4 : 1)) % 5;
+                this.optionsIndex = (this.optionsIndex + (key === "arrowup" ? 5 : 1)) % 6;
                 this.renderMenu();
             }
             if (key === "arrowleft" || key === "arrowright") {
@@ -1070,13 +1142,17 @@ export class GameWorld {
                     this.qualityIndex = (this.qualityIndex + dir + QUALITY_OPTIONS.length) % QUALITY_OPTIONS.length;
                     this.setQuality(QUALITY_OPTIONS[this.qualityIndex].id);
                 }
-                else if (this.optionsIndex >= 1 && this.optionsIndex <= 3) {
+                else if (this.optionsIndex === 1) {
+                    this.resolutionIndex = (this.resolutionIndex + dir + RESOLUTION_OPTIONS.length) % RESOLUTION_OPTIONS.length;
+                    this.setResolution(RESOLUTION_OPTIONS[this.resolutionIndex].id);
+                }
+                else if (this.optionsIndex >= 2 && this.optionsIndex <= 4) {
                     const clamp = (v) => Math.max(0, Math.min(1, Math.round(v * 10) / 10));
-                    if (this.optionsIndex === 1)
-                        this.masterVolume = clamp(this.masterVolume + dir * 0.1);
                     if (this.optionsIndex === 2)
-                        this.musicVolume = clamp(this.musicVolume + dir * 0.1);
+                        this.masterVolume = clamp(this.masterVolume + dir * 0.1);
                     if (this.optionsIndex === 3)
+                        this.musicVolume = clamp(this.musicVolume + dir * 0.1);
+                    if (this.optionsIndex === 4)
                         this.sfxVolume = clamp(this.sfxVolume + dir * 0.1);
                     this.audio.setVolumes(this.masterVolume, this.musicVolume, this.sfxVolume);
                 }
@@ -1088,7 +1164,7 @@ export class GameWorld {
                 this.renderMenu();
             }
             if (key === "enter" || rawKey === " ") {
-                this.save.update({ settings: { quality: this.quality, masterVolume: this.masterVolume, musicVolume: this.musicVolume, sfxVolume: this.sfxVolume, difficulty: this.difficulty } });
+                this.save.update({ settings: { quality: this.quality, resolution: this.resolution, masterVolume: this.masterVolume, musicVolume: this.musicVolume, sfxVolume: this.sfxVolume, difficulty: this.difficulty } });
                 this.audio.sfxPlay("menu");
                 this.showMenu();
             }
@@ -1265,8 +1341,7 @@ export class GameWorld {
                 else if (fps < 54) this.autoQualityMode = "medium";
                 else if (fps > 58) this.autoQualityMode = "high";
                 if (previous !== this.autoQualityMode) {
-                    this.mediumDetailRoot.setEnabled(this.autoQualityMode !== "low");
-                    this.highDetailRoot.setEnabled(this.autoQualityMode === "high");
+                    this.applyQuality();
                 }
                 this.autoQualityTimer = 0;
             }
@@ -1900,7 +1975,7 @@ export class GameWorld {
         const rover = this.hasRover ? `   ROVER ${Math.max(0, this.roverHp)}/12` : "";
         this.hudBoard.setText(`${getLevel(this.currentLevel).operation} // F${this.currentLevel}`, [
             `VITAL ${"■".repeat(Math.max(0, Math.ceil(this.player.health)))}${"□".repeat(Math.max(0, data.maxHealth - Math.ceil(this.player.health)))}   ${WEAPONS[this.weapon].label} ${ammo}   G ${this.player.grenades}${rover}`,
-            `PONTOS ${this.player.score.toString().padStart(6, "0")}   ${this.securityNotice}   Q:${QUALITY_OPTIONS[this.qualityIndex].label}`,
+            `PONTOS ${this.player.score.toString().padStart(6, "0")}   ${this.securityNotice}   Q:${QUALITY_OPTIONS[this.qualityIndex].label}   R:${RESOLUTION_OPTIONS[this.resolutionIndex].label}`,
         ]);
         this.bossMeter.root.setEnabled(this.boss.active);
         this.bossMeter.fill.scaling.x = Math.max(0, this.boss.hp / this.boss.maxHp);

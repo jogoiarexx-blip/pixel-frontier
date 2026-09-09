@@ -65,13 +65,13 @@ async function start() {
     engine = new Engine(canvas, false, {
       preserveDrawingBuffer: false,
       stencil: false,
-      adaptToDeviceRatio: true,
       powerPreference: "high-performance",
       antialias: false,
     });
     setBoot("CRIANDO CENA...", 48);
     game = await createGameScene(engine, canvas);
     setBoot("PREPARANDO MISSÃO...", 82);
+    game?.refreshDisplay?.();
     renderFrame = () => { game.scene.render(); updateDebug(); };
     engine.runRenderLoop(renderFrame);
 
