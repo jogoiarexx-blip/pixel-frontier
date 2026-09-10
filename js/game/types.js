@@ -31,4 +31,15 @@ export const CHARACTERS = {
         description: "Mais resistente em confronto direto. Seus pulsos viajam mais rápido e carrega quatro granadas.",
         jacket: "#457ca8", accent: "#f1bf5d", speed: 7.5, fireRate: 0.22, grenades: 4, maxHealth: 5,
     },
+    mika: {
+        id: "mika", name: "MIKA TORRES", callSign: "ECO // OLHO VERDE", role: "Equilíbrio & sobrevivência",
+        description: "Equilibrada, precisa e ágil. Recupera o ritmo rapidamente após receber dano.",
+        jacket: "#4c8c67", accent: "#79d3b2", speed: 8.2, fireRate: 0.18, grenades: 3, maxHealth: 5,
+    },
+    brutus: {
+        id: "brutus", name: "BRUTUS KANE", callSign: "MARTELO // MURO VERMELHO", role: "Blindagem & poder de fogo",
+        description: "Mais lento, porém extremamente resistente. Entra em combate com cinco granadas.",
+        jacket: "#934f43", accent: "#d3a34f", speed: 6.9, fireRate: 0.20, grenades: 5, maxHealth: 6,
+    },
 };
+export const CHARACTER_ORDER = ["ari", "dax", "mika", "brutus"];

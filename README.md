@@ -1,4 +1,4 @@
-# Pixel Frontier v1.5.0 — HTML + JavaScript + CSS
+# Pixel Frontier v0.9.2 — HTML + JavaScript + CSS
 
 Edição estática para navegador e GitHub Pages. Não usa React, TypeScript, Vite, Node, npm, pnpm nem processo de build.
 
@@ -28,12 +28,49 @@ Adicione `?debug=1` ao endereço publicado para exibir FPS, resolução e DPR.
 
 
 ## Campanha
-A versão v1.5.0 possui **12 fases/operações**, com seleção paginada, checkpoints, save e dificuldade progressiva.
+A versão v0.9.2 possui **12 fases/operações**, com seleção paginada, checkpoints, save e dificuldade progressiva.
 
 
-## Melhorias visuais v1.5.0
+## Melhorias visuais v0.9.2
 - paletas mais distintas por fase
 - fundos e horizonte mais ricos por tema
 - elementos extras de cenário em camadas
 - opção de resolução interna: AUTO, 480P, 720P, 900P e 1080P
 - qualidade gráfica: AUTO, BAIXO, MÉDIO e ALTO
+
+
+## Overhaul visual v0.9.2
+- drone agora usa spritesheet animada
+- Rover agora usa spritesheet animada
+- jipe inimigo agora usa spritesheet animada
+- helicóptero de ataque agora usa spritesheet animada
+- resgatados agora usam spritesheet animada
+- animações integradas ao movimento e ataque
+- correção das portas/painéis preservada nesta base
+- qualidade gráfica AUTO/BAIXO/MÉDIO/ALTO mantida
+- resolução AUTO/480P/720P/900P/1080P mantida
+
+
+## Atualização v1.7.0 — Level Design, Inimigos e Combate
+- Fases 1–4 ganharam plataformas e armadilhas extras específicas por operação.
+- Novos papéis de inimigos: rifleiro, granadeiro, metralhador, sniper e escudeiro.
+- Cada papel tem HP, distância de combate, velocidade e padrão de ataque próprios.
+- Reforços de jipe/helicóptero agora também podem trazer classes diferentes.
+- Bosses ganharam quatro perfis de comportamento, reutilizados como famílias nas fases seguintes.
+- Granadas e foguetes agora causam dano em área, dano por distância e knockback leve.
+- Escudeiros reduzem dano frontal de projéteis comuns; explosivos são mais eficientes.
+
+
+## Campanha narrativa v0.9.2
+- 4 personagens jogáveis: Ari Voss, Dax Rook, Mika Torres e Brutus Kane
+- prólogo de história antes da primeira operação
+- briefing narrativo individual para as 12 fases
+- chamada INICIAR MISSÃO antes do gameplay
+- loading real entre operações
+- cada fase possui asset de cenário próprio em `assets/stages/`
+- assets exclusivos da fase anterior são liberados logicamente na troca de operação
+
+
+## Versão atual
+- O versionamento foi reiniciado para **v0.9.2**.
+- Esta versão inclui o novo menu tático e o overhaul de sprites dos inimigos, bosses e efeitos de combate.

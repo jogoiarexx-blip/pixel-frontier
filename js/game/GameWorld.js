@@ -1,13 +1,38 @@
 // Fronteira de Cobre: mundo run-and-gun original, com estado explícito e UI no canvas.
 import { Vector3 } from "@babylonjs/core/Maths/math.vector.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
-import { attackHelicopterSprite, bossSprite, droneSprite, enemyJeepSprite, explorerSprite, rescueSprite, roverSprite, sentrySprite } from "./entities.js";
-import { assetSheetSprite, meter, rect, setAssetFrame, sprite, textBoard } from "./pixelArt.js";
-import { CHARACTERS, QUALITY_OPTIONS, RESOLUTION_OPTIONS, WEAPONS } from "./types.js";
+import { attackHelicopterSprite, bossSprite, combatSoldierSprite, droneSprite, enemyJeepSprite, explorerSprite, rescueSprite, roverSprite, sentrySprite } from "./entities.js";
+import { assetSheetSprite, assetSprite, meter, rect, setAssetFrame, setAssetTint, sprite, textBoard } from "./pixelArt.js";
+import { CHARACTER_ORDER, CHARACTERS, QUALITY_OPTIONS, RESOLUTION_OPTIONS, WEAPONS } from "./types.js";
 import { SaveManager } from "./systems/SaveManager.js";
 import { AssetManager } from "./systems/AssetManager.js";
 import { AudioManager } from "./systems/AudioManager.js";
 import { LEVELS, getLevel } from "./systems/LevelData.js";
+
+const STORY_PAGES = [
+    {
+        title: "PRÓLOGO // FRONTEIRA EM GUERRA",
+        lines: [
+            "ANO 20XX. UMA ALIANÇA MILITAR TOMOU AS ROTAS DO CONTINENTE.",
+            "CIDADES CAÍRAM, PORTOS FORAM OCUPADOS E A FORTALEZA OMEGA FOI ATIVADA.",
+            "QUATRO SOLDADOS DA UNIDADE FRONTIER RECEBEM UMA ÚLTIMA ORDEM:",
+            "ROMPER AS 12 ZONAS DE GUERRA E DESTRUIR O NÚCLEO OMEGA.",
+            "A OPERAÇÃO COMEÇA NA VILA OCUPADA.",
+            "ENTER: CONTINUAR   ESC: MENU",
+        ],
+    },
+    {
+        title: "UNIDADE FRONTIER",
+        lines: [
+            "ARI VOSS // VELOCIDADE E PRECISÃO",
+            "DAX ROOK // RESISTÊNCIA E DEMOLIÇÃO",
+            "MIKA TORRES // EQUILÍBRIO E SOBREVIVÊNCIA",
+            "BRUTUS KANE // BLINDAGEM E PODER DE FOGO",
+            "A ESCOLHA DO SOLDADO ALTERA O RITMO DA MISSÃO.",
+            "ENTER: ESCOLHER PERSONAGEM   ESC: MENU",
+        ],
+    },
+];
 export class GameWorld {
     scene;
     camera;
@@ -21,7 +46,18 @@ export class GameWorld {
     hudBoard;
     previewAri;
     previewDax;
+    previewMika;
+    previewBrutus;
     brandMark;
+    stageBackdrop;
+    menuBackdropMain;
+    menuBackdropSelect;
+    menuLogo;
+    menuHeliDecor;
+    menuJeepDecor;
+    menuSoldierDecorA;
+    menuSoldierDecorB;
+    characterCards = [];
     bossMeter;
     mediumDetailRoot;
     highDetailRoot;
@@ -46,6 +82,7 @@ export class GameWorld {
     currentLevel = 1;
     difficulty = "normal";
     levelThemeRoot;
+    levelGameplayRoot;
     loadingProgress = 0;
     loadingLabel = "PREPARANDO";
     checkpointX = 2;
@@ -70,7 +107,7 @@ export class GameWorld {
     projectiles = [];
     projectilePool = [];
     combatFx = [];
-    combatFxPool = { explosion: [], hit: [], smoke: [] };
+    combatFxPool = { explosion: [], hit: [], smoke: [], muzzleFlash: [], enemyDeathRifle: [], enemyDeathGrenadier: [], enemyDeathMachinegunner: [], enemyDeathSniper: [], enemyDeathShield: [], vehicleExplosion: [] };
     enemies = [];
     rescues = [];
     missionVehicles = [];
@@ -87,6 +124,8 @@ export class GameWorld {
     grenadeTimer = 0;
     elapsed = 0;
     demoTime = 0;
+    storyPage = 0;
+    missionStartTimer = 0;
     hasRover = false;
     dirtyHud = 0;
     shotFlash = 0;
@@ -134,6 +173,8 @@ export class GameWorld {
         this.worldRoot = new TransformNode("world-root", scene);
         this.levelThemeRoot = new TransformNode("level-theme-root", scene);
         this.levelThemeRoot.parent = this.worldRoot;
+        this.levelGameplayRoot = new TransformNode("level-gameplay-root", scene);
+        this.levelGameplayRoot.parent = this.worldRoot;
         this.uiRoot = new TransformNode("ui-root", scene);
         this.playerRoot = explorerSprite(scene, CHARACTERS.ari, "hero-ari");
         this.playerRoot.parent = this.worldRoot;
@@ -160,14 +201,68 @@ export class GameWorld {
         ], -3.8);
         this.brandMark.parent = this.uiRoot;
         this.brandMark.position.set(-10.7, 6.1, 0);
+        this.menuBackdropMain = assetSprite(scene, "menu-backdrop-main", "./assets/ui/menu_backdrop.png", 23.2, 13.1, -5.4, 0);
+        this.menuBackdropMain.parent = this.uiRoot;
+        this.menuBackdropMain.position.set(0, 0.15, 0);
+        this.menuBackdropSelect = assetSprite(scene, "menu-backdrop-select", "./assets/ui/select_backdrop.png", 23.2, 13.1, -5.38, 0);
+        this.menuBackdropSelect.parent = this.uiRoot;
+        this.menuBackdropSelect.position.set(0, 0.15, 0);
+        this.menuLogo = assetSprite(scene, "menu-logo", "./assets/ui/title_logo.png", 11.2, 3.1, -3.65, 0);
+        this.menuLogo.parent = this.uiRoot;
+        this.menuLogo.position.set(-5.5, 4.3, 0);
+        this.menuHeliDecor = attackHelicopterSprite(scene, "menu-heli-decor");
+        this.menuHeliDecor.parent = this.uiRoot;
+        this.menuHeliDecor.position.set(-7.2, 2.9, -3.95);
+        this.menuHeliDecor.scaling.setAll(0.96);
+        this.menuJeepDecor = enemyJeepSprite(scene, "menu-jeep-decor");
+        this.menuJeepDecor.parent = this.uiRoot;
+        this.menuJeepDecor.position.set(-7.6, -4.85, -3.95);
+        this.menuJeepDecor.scaling.setAll(1.05);
+        this.menuSoldierDecorA = combatSoldierSprite(scene, "menu-soldier-decor-a", "rifle");
+        this.menuSoldierDecorA.parent = this.uiRoot;
+        this.menuSoldierDecorA.position.set(-5.3, -4.8, -3.9);
+        this.menuSoldierDecorA.scaling.setAll(1.12);
+        this.menuSoldierDecorB = combatSoldierSprite(scene, "menu-soldier-decor-b", "machinegunner");
+        this.menuSoldierDecorB.parent = this.uiRoot;
+        this.menuSoldierDecorB.position.set(-3.9, -4.8, -3.9);
+        this.menuSoldierDecorB.scaling.setAll(1.08);
+        const cardDefs = [
+            ["ari", -8.0, 1.6, "./assets/ui/portrait_ari_sheet.png"],
+            ["dax", -4.7, 1.6, "./assets/ui/portrait_dax_sheet.png"],
+            ["mika", -8.0, -2.0, "./assets/ui/portrait_mika_sheet.png"],
+            ["brutus", -4.7, -2.0, "./assets/ui/portrait_brutus_sheet.png"],
+        ];
+        cardDefs.forEach(([id, x, y, asset]) => {
+            const root = new TransformNode(`card-${id}`, scene);
+            root.parent = this.uiRoot;
+            root.position.set(x, y, -3.72);
+            root.metadata = { baseX: x, baseY: y };
+            const glow = rect(scene, `card-${id}-glow`, 2.84, 2.84, "#41d6d1", root, 0, 0, 0.14);
+            glow.setEnabled(false);
+            const trim = rect(scene, `card-${id}-trim`, 2.62, 2.62, "#e6752a", root, 0, 0, 0.12);
+            const ink = rect(scene, `card-${id}-ink`, 2.36, 2.36, "#102633", root, 0, 0, 0.10);
+            const stripe = rect(scene, `card-${id}-stripe`, 1.54, 0.18, CHARACTERS[id].accent, root, 0, -1.0, 0.08);
+            const portrait = assetSprite(scene, `card-${id}-portrait`, asset, 1.86, 1.86, 0.02, 0.08);
+            portrait.parent = root;
+            portrait.position.set(0, 0.08, 0);
+            this.characterCards.push({ id, root, glow, trim, ink, stripe, portrait });
+        });
         this.previewAri = explorerSprite(scene, CHARACTERS.ari, "preview-ari");
         this.previewAri.parent = this.uiRoot;
-        this.previewAri.position.set(-11.2, -1.0, -3.55);
+        this.previewAri.position.set(-10.8, -0.8, -3.55);
         this.previewAri.scaling.setAll(1.45);
         this.previewDax = explorerSprite(scene, CHARACTERS.dax, "preview-dax");
         this.previewDax.parent = this.uiRoot;
-        this.previewDax.position.set(-11.2, -1.0, -3.55);
+        this.previewDax.position.set(-10.8, -0.8, -3.55);
         this.previewDax.scaling.setAll(1.45);
+        this.previewMika = explorerSprite(scene, CHARACTERS.mika, "preview-mika");
+        this.previewMika.parent = this.uiRoot;
+        this.previewMika.position.set(-10.8, -0.8, -3.55);
+        this.previewMika.scaling.setAll(1.45);
+        this.previewBrutus = explorerSprite(scene, CHARACTERS.brutus, "preview-brutus");
+        this.previewBrutus.parent = this.uiRoot;
+        this.previewBrutus.position.set(-10.8, -0.8, -3.55);
+        this.previewBrutus.scaling.setAll(1.45);
         this.hudBoard = textBoard(scene, "hud-board", 13.2, 2.65, { x: -8.8, y: 6.55, z: -3 });
         this.hudBoard.root.parent = this.uiRoot;
         this.bossMeter = meter(scene, "argo-core", 9.6, "#e6752a", this.uiRoot, 5.5, 6.65);
@@ -306,38 +401,47 @@ export class GameWorld {
         });
     }
     buildSecurityRoute() {
-        const switchSpecs = [
-            { id: "console-alpha", doorId: "gate-alpha", x: 11.2, y: -4.22, accent: "#41d6d1" },
-            { id: "console-beta", doorId: "gate-beta", x: 48.0, y: -2.55, accent: "#f1bf5d" },
-        ];
-        switchSpecs.forEach((spec) => {
-            const root = sprite(this.scene, spec.id, [
-                { tag: "base", x: 0, y: 0, width: 0.94, height: 0.92, color: "#07141d" },
-                { tag: "case", x: 0, y: 0.02, width: 0.72, height: 0.68, color: "#31535f" },
-                { tag: "label", x: 0, y: 0.24, width: 0.36, height: 0.12, color: spec.accent },
-                { tag: "lamp-off", x: 0, y: -0.18, width: 0.22, height: 0.22, color: "#c45428" },
-                { tag: "lamp-on", x: 0, y: -0.18, width: 0.30, height: 0.30, color: spec.accent },
-            ], 0.5);
-            root.parent = this.worldRoot;
-            root.position.set(spec.x, spec.y, 0);
-            this.setPartVisible(root, "lamp-on", false);
-            this.securitySwitches.push({ id: spec.id, doorId: spec.doorId, root, box: { x: spec.x, y: spec.y, halfWidth: 0.72, halfHeight: 0.88 }, activated: false });
-        });
+        // v1.4.3: cada porta possui o próprio painel de abertura.
+        // Não há mais console remoto escondido em outro trecho da fase.
+        this.securitySwitches = [];
         const doorSpecs = [
-            { id: "gate-alpha", x: 27.0, accent: "#41d6d1" },
-            { id: "gate-beta", x: 61.5, accent: "#f1bf5d" },
+            { id: "gate-alpha", x: 27.0, accent: "#41d6d1", label: "PORTA A" },
+            { id: "gate-beta", x: 61.5, accent: "#f1bf5d", label: "PORTA B" },
         ];
         doorSpecs.forEach((spec) => {
             const closedY = -3.70;
             const root = sprite(this.scene, spec.id, [
-                { tag: "frame", x: 0, y: 0, width: 1.86, height: 4.18, color: "#07141d" },
+                { tag: "frame", x: 0, y: 0, width: 1.98, height: 4.28, color: "#07141d" },
                 { tag: "slabs", x: 0, y: 0, width: 1.48, height: 3.82, color: "#263d4a" },
-                { tag: "signal", x: 0, y: 0.62, width: 0.76, height: 0.24, color: spec.accent },
+                { tag: "signal-off", x: 0, y: 0.72, width: 0.78, height: 0.24, color: "#c45428" },
+                { tag: "signal-on", x: 0, y: 0.72, width: 0.88, height: 0.28, color: spec.accent },
                 { tag: "braces", x: 0, y: -0.72, width: 1.12, height: 0.20, color: "#e6752a" },
+                // Painel físico preso no batente esquerdo, visível ao chegar na porta.
+                { tag: "panel-case", x: -1.20, y: -0.42, width: 0.56, height: 0.82, color: "#07141d" },
+                { tag: "panel-face", x: -1.20, y: -0.42, width: 0.40, height: 0.62, color: "#31535f" },
+                { tag: "panel-off", x: -1.20, y: -0.30, width: 0.22, height: 0.22, color: "#e6752a" },
+                { tag: "panel-on", x: -1.20, y: -0.30, width: 0.28, height: 0.28, color: spec.accent },
+                { tag: "panel-key", x: -1.20, y: -0.62, width: 0.22, height: 0.10, color: "#f1bf5d" },
+                // Um segundo indicador no lado direito evita confusão após checkpoints.
+                { tag: "panel-right-case", x: 1.20, y: -0.42, width: 0.56, height: 0.82, color: "#07141d" },
+                { tag: "panel-right-face", x: 1.20, y: -0.42, width: 0.40, height: 0.62, color: "#31535f" },
+                { tag: "panel-right-off", x: 1.20, y: -0.30, width: 0.22, height: 0.22, color: "#e6752a" },
+                { tag: "panel-right-on", x: 1.20, y: -0.30, width: 0.28, height: 0.28, color: spec.accent },
             ], 0.7);
             root.parent = this.worldRoot;
             root.position.set(spec.x, closedY, 0);
-            this.securityDoors.push({ id: spec.id, root, box: { x: spec.x, y: closedY, halfWidth: 0.74, halfHeight: 1.90 }, closedY, open: false });
+            this.setPartVisible(root, "signal-on", false);
+            this.setPartVisible(root, "panel-on", false);
+            this.setPartVisible(root, "panel-right-on", false);
+            this.securityDoors.push({
+                id: spec.id,
+                label: spec.label,
+                root,
+                box: { x: spec.x, y: closedY, halfWidth: 0.78, halfHeight: 1.96 },
+                interactionBox: { x: spec.x, y: -4.20, halfWidth: 2.05, halfHeight: 1.45 },
+                closedY,
+                open: false,
+            });
         });
         [7.2, 35.8, 54.2].forEach((x, index) => {
             const root = sprite(this.scene, `floor-trap-${index}`, [
@@ -352,27 +456,7 @@ export class GameWorld {
             this.groundTraps.push({ id: `floor-trap-${index}`, root, box: { x, y: -5.16, halfWidth: 1.02, halfHeight: 0.34 }, cooldown: 0 });
         });
     }
-    effectiveQuality() {
-        return this.quality === "auto" ? this.autoQualityMode : this.quality;
-    }
-    applyRenderProfile() {
-        if (!this.engine)
-            return;
-        const width = Math.max(1, window.innerWidth || 1280);
-        const height = Math.max(1, window.innerHeight || 720);
-        const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-        const preset = RESOLUTION_OPTIONS.find((option) => option.id === this.resolution) ?? RESOLUTION_OPTIONS[0];
-        const effective = this.effectiveQuality();
-        let targetHeight = preset.height || Math.round(height * dpr);
-        if (preset.id === "auto") {
-            targetHeight = Math.round(height * dpr * (effective === "low" ? 0.72 : effective === "medium" ? 0.9 : 1));
-        }
-        targetHeight = Math.max(360, Math.min(Math.round(height * dpr), targetHeight));
-        const scaling = Math.max(1, (height * dpr) / targetHeight);
-        this.engine.setHardwareScalingLevel(scaling);
-        this.engine.resize();
-    }
-    applyQuality() {
+    applyQuality( {
         const effective = this.effectiveQuality();
         this.mediumDetailRoot.setEnabled(effective === "medium" || effective === "high");
         this.highDetailRoot.setEnabled(effective === "high");
@@ -392,12 +476,26 @@ export class GameWorld {
         this.renderMenu();
     }
     applyLevelTheme() {
+        if (this.stageBackdrop) {
+            for (const mesh of this.stageBackdrop.getChildMeshes?.() ?? []) {
+                const material = mesh.material;
+                if (material?.diffuseTexture) material.diffuseTexture.dispose();
+                material?.dispose?.();
+                mesh.dispose();
+            }
+            this.stageBackdrop.dispose();
+            this.stageBackdrop = null;
+        }
         this.levelThemeRoot.dispose();
         this.levelThemeRoot = new TransformNode(`level-theme-${this.currentLevel}`, this.scene);
         this.levelThemeRoot.parent = this.worldRoot;
         const level = getLevel(this.currentLevel);
         const theme = level.theme ?? "village";
         const accent = level.tint ?? "#8a765d";
+        const stageId = String(this.currentLevel).padStart(2, "0");
+        this.stageBackdrop = assetSprite(this.scene, `stage-backdrop-${stageId}`, `./assets/stages/stage_${stageId}_backdrop.png`, 160, 80, 4.995, 0);
+        this.stageBackdrop.parent = this.levelThemeRoot;
+        this.stageBackdrop.position.set(70, 5.5, 0);
         const palettes = {
             village: { sky: "#61777c", haze: "#c88a55", far: "#6f5648", mid: "#8a765d", line: "#b89062", glow: "#e6c16d" },
             bridge: { sky: "#697888", haze: "#768796", far: "#4f5861", mid: "#6f767d", line: "#afb8bc", glow: "#f1c96a" },
@@ -478,6 +576,52 @@ export class GameWorld {
             rect(this.scene, `theme-beacon-${this.currentLevel}-${i}`, 0.16, 0.16, p.glow, this.levelThemeRoot, x + 1.1, -4.8, 0.58);
         }
     }
+    buildLevelGameplayLayout() {
+        this.surfaces = this.surfaces.filter((surface) => !String(surface.id).startsWith("level-"));
+        this.groundTraps = this.groundTraps.filter((trap) => !String(trap.id).startsWith("level-"));
+        this.levelGameplayRoot?.dispose();
+        this.levelGameplayRoot = new TransformNode(`level-gameplay-${this.currentLevel}`, this.scene);
+        this.levelGameplayRoot.parent = this.worldRoot;
+        const level = this.currentLevel;
+        const platformSets = {
+            1: [[12.5, 2.0, -3.95], [21.0, 1.45, -3.15], [52.5, 1.9, -3.75]],
+            2: [[11.0, 2.3, -3.25], [20.5, 1.8, -2.45], [39.5, 2.6, -3.05], [55.0, 1.7, -2.30]],
+            3: [[9.0, 1.8, -3.65], [18.0, 1.5, -2.75], [37.0, 2.0, -3.35], [58.0, 1.65, -2.55]],
+            4: [[10.0, 2.1, -3.40], [24.0, 1.8, -2.55], [44.0, 2.4, -3.20], [59.5, 2.0, -2.40]],
+        };
+        const trapSets = {
+            1: [[18.0, "MINA"]],
+            2: [[14.0, "FIO"], [47.0, "FIO"]],
+            3: [[30.0, "ESPINHO"], [49.0, "ESPINHO"]],
+            4: [[17.0, "LASER"], [34.0, "LASER"], [53.0, "LASER"]],
+        };
+        for (const [index, [x, halfWidth, landY]] of (platformSets[level] ?? []).entries()) {
+            const id = `level-platform-${level}-${index}`;
+            const root = sprite(this.scene, id, [
+                { tag: "shadow", x: 0, y: -0.10, width: halfWidth * 2 + 0.30, height: 0.32, color: "#10161a" },
+                { tag: "deck", x: 0, y: 0, width: halfWidth * 2, height: 0.22, color: level === 3 ? "#5f6940" : level === 4 ? "#59636a" : level === 2 ? "#707a80" : "#765b42" },
+                { tag: "rim", x: 0, y: 0.12, width: halfWidth * 1.75, height: 0.07, color: level === 4 ? "#e6752a" : "#d7ba72" },
+                { tag: "support-a", x: -halfWidth + 0.35, y: -0.62, width: 0.18, height: 1.10, color: "#1f2729" },
+                { tag: "support-b", x: halfWidth - 0.35, y: -0.62, width: 0.18, height: 1.10, color: "#1f2729" },
+            ], 1.25);
+            root.parent = this.levelGameplayRoot;
+            root.position.set(x, landY - 0.12, 0);
+            this.surfaces.push({ id, x, halfWidth, landY });
+        }
+        for (const [index, [x, label]] of (trapSets[level] ?? []).entries()) {
+            const id = `level-trap-${level}-${index}`;
+            const root = sprite(this.scene, id, [
+                { tag: "base", x: 0, y: 0, width: 1.7, height: 0.22, color: "#151b1d" },
+                { tag: "danger-a", x: -0.45, y: 0.18, width: 0.16, height: 0.44, color: "#d94e3f" },
+                { tag: "danger-b", x: 0, y: 0.18, width: 0.16, height: 0.44, color: "#f0b956" },
+                { tag: "danger-c", x: 0.45, y: 0.18, width: 0.16, height: 0.44, color: "#d94e3f" },
+            ], 0.95);
+            root.parent = this.levelGameplayRoot;
+            root.position.set(x, -5.90, 0);
+            this.groundTraps.push({ id, label, root, box: { x, y: -5.16, halfWidth: 0.78, halfHeight: 0.32 }, cooldown: 0 });
+        }
+        if (level <= 4) this.securityNotice = `OP ${String(level).padStart(2, "0")}: ROTA TÁTICA ATIVA`;
+    }
     createMissionActors() {
 
         this.enemies.forEach((enemy) => enemy.root.dispose(false, enemy.kind === "sentry"));
@@ -509,8 +653,16 @@ export class GameWorld {
             12: [["drone", 11.5, -1.6, 5.0, 12.5], ["sentry", 17.0, -5.15, 10.0, 19.0], ["drone", 25.0, -1.5, 18.0, 26.0], ["sentry", 33.0, -5.15, 26.0, 35.0], ["drone", 41.0, -1.5, 34.0, 42.0], ["sentry", 49.0, -5.15, 42.0, 51.0], ["drone", 57.0, -1.5, 50.0, 58.0], ["sentry", 64.0, -5.15, 57.0, 66.0], ["drone", 68.0, -1.5, 61.0, 69.0]],
         };
         specs.push(...(extraWaves[this.currentLevel] ?? []));
+        const roleSets = {
+            1: ["rifle", "grenadier", "rifle", "machinegunner"],
+            2: ["rifle", "sniper", "grenadier", "machinegunner", "shield"],
+            3: ["rifle", "grenadier", "machinegunner", "shield", "sniper"],
+            4: ["machinegunner", "shield", "sniper", "grenadier", "rifle"],
+        };
+        const roleSet = roleSets[this.currentLevel] ?? ["rifle", "grenadier", "machinegunner", "sniper", "shield"];
         specs.forEach(([kind, x, y, triggerX, entryX], index) => {
-            const root = kind === "sentry" ? sentrySprite(this.scene, `sentry-${index}`) : droneSprite(this.scene, `drone-${index}`);
+            const role = kind === "sentry" ? roleSet[index % roleSet.length] : "drone";
+            const root = kind === "sentry" ? combatSoldierSprite(this.scene, `sentry-${role}-${index}`, role) : droneSprite(this.scene, `drone-${index}`);
             root.parent = this.worldRoot;
             const startX = entryX + (kind === "sentry" ? 7.0 : 5.0);
             const startY = kind === "drone" ? y + 5.5 : y;
@@ -519,8 +671,9 @@ export class GameWorld {
             const level = getLevel(this.currentLevel);
             const diffHp = this.difficulty === "easy" ? 0.82 : this.difficulty === "hard" ? 1.28 : 1;
             const diffFire = this.difficulty === "easy" ? 1.22 : this.difficulty === "hard" ? 0.82 : 1;
-            const hp = Math.max(2, Math.round(2 * level.enemyHpScale * diffHp));
-            this.enemies.push({ root, x: startX, y, hp, maxHp: hp, cooldown: (0.7 + index * 0.14) * level.enemyFireScale * diffFire, fireScale: level.enemyFireScale * diffFire, kind, drift: index * 1.2, alive: true, active: false, triggerX, entryX, entering: true });
+            const roleHp = role === "shield" ? 2.3 : role === "machinegunner" ? 1.6 : role === "sniper" ? 1.15 : role === "grenadier" ? 1.35 : 1;
+            const hp = Math.max(2, Math.round(2 * level.enemyHpScale * diffHp * roleHp));
+            this.enemies.push({ root, x: startX, y, hp, maxHp: hp, cooldown: (0.7 + index * 0.14) * level.enemyFireScale * diffFire, fireScale: level.enemyFireScale * diffFire, kind, role, drift: index * 1.2, alive: true, active: false, triggerX, entryX, entering: true });
         });
         [10, 28, 52].forEach((x, index) => {
             const root = rescueSprite(this.scene, `rescue-${index}`);
@@ -566,14 +719,17 @@ export class GameWorld {
         }
     }
     spawnReinforcementSoldier(x, label) {
-        const root = sentrySprite(this.scene, `reinforcement-${label}-${Math.random().toString(36).slice(2)}`);
+        const roles = this.currentLevel <= 1 ? ["rifle", "grenadier"] : this.currentLevel === 2 ? ["rifle", "sniper", "grenadier"] : this.currentLevel === 3 ? ["rifle", "machinegunner", "shield"] : ["machinegunner", "shield", "sniper", "grenadier"];
+        const role = roles[Math.abs((label.length + Math.round(x * 10))) % roles.length];
+        const root = combatSoldierSprite(this.scene, `reinforcement-${role}-${label}-${Math.random().toString(36).slice(2)}`, role);
         root.parent = this.worldRoot;
         root.position.set(x, -5.15, 0);
         const level = getLevel(this.currentLevel);
         const diffHp = this.difficulty === "easy" ? 0.82 : this.difficulty === "hard" ? 1.28 : 1;
         const diffFire = this.difficulty === "easy" ? 1.22 : this.difficulty === "hard" ? 0.82 : 1;
-        const hp = Math.max(2, Math.round(2 * level.enemyHpScale * diffHp));
-        this.enemies.push({ root, x, y: -5.15, hp, maxHp: hp, cooldown: (0.5 + Math.random() * 0.7) * level.enemyFireScale * diffFire, fireScale: level.enemyFireScale * diffFire, kind: "sentry", drift: Math.random() * 5, alive: true, active: true, triggerX: -1, entryX: x, entering: false });
+        const roleHp = role === "shield" ? 2.3 : role === "machinegunner" ? 1.6 : role === "sniper" ? 1.15 : role === "grenadier" ? 1.35 : 1;
+        const hp = Math.max(2, Math.round(2 * level.enemyHpScale * diffHp * roleHp));
+        this.enemies.push({ root, x, y: -5.15, hp, maxHp: hp, cooldown: (0.5 + Math.random() * 0.7) * level.enemyFireScale * diffFire, fireScale: level.enemyFireScale * diffFire, kind: "sentry", role, drift: Math.random() * 5, alive: true, active: true, triggerX: -1, entryX: x, entering: false });
     }
     updateMissionVehicles(dt) {
         for (const vehicle of this.missionVehicles) {
@@ -590,8 +746,7 @@ export class GameWorld {
                 if (Math.abs(dx) > 0.18) {
                     vehicle.root.position.x += Math.sign(dx) * dt * 7.6;
                     vehicle.root.rotation.z = Math.sin(this.elapsed * 17) * 0.015;
-                    this.animatePart(vehicle.root, "wheel-a", 0, Math.sin(this.elapsed * 23) * 0.06);
-                    this.animatePart(vehicle.root, "wheel-b", 0, -Math.sin(this.elapsed * 23) * 0.06);
+                    setAssetFrame(vehicle.root, Math.floor(this.elapsed * 12) % 3);
                 }
                 else if (!vehicle.spawned) {
                     vehicle.spawned = true;
@@ -615,9 +770,10 @@ export class GameWorld {
             else {
                 vehicle.root.position.x -= dt * 4.8;
                 vehicle.root.position.y = 3.7 + Math.sin(this.elapsed * 3.2) * 0.24;
-                this.animatePart(vehicle.root, "rotor", Math.sin(this.elapsed * 45) * 0.8, 0);
+                setAssetFrame(vehicle.root, Math.floor(this.elapsed * 14) % 3);
                 vehicle.cooldown -= dt;
                 if (vehicle.cooldown <= 0 && Math.abs(vehicle.root.position.x - this.player.x) < 11) {
+                    setAssetFrame(vehicle.root, 3);
                     this.spawnProjectile(vehicle.root.position.x - 1.2, vehicle.root.position.y - 0.7, -5.5, -5.6, false, 1, true);
                     vehicle.cooldown = 1.25 * getLevel(this.currentLevel).enemyFireScale * (this.difficulty === "easy" ? 1.18 : this.difficulty === "hard" ? 0.84 : 1);
                 }
@@ -714,10 +870,13 @@ export class GameWorld {
         this.roverRoot.setEnabled(true);
         this.bossRoot.position.set(84, -4.68, 0);
         this.bossRoot.setEnabled(false);
+        const bossTints = ["#ffffff", "#a9b8c4", "#91a675", "#c49773"];
+        setAssetTint(this.bossRoot, bossTints[(this.currentLevel - 1) % bossTints.length]);
         const bossHp = Math.round(36 * getLevel(this.currentLevel).enemyHpScale * (this.difficulty === "easy" ? 0.85 : this.difficulty === "hard" ? 1.25 : 1));
         this.boss = { active: false, hp: bossHp, maxHp: bossHp, cooldown: 1.5, direction: -1 };
         this.hasRover = false;
         this.applyLevelTheme();
+        this.buildLevelGameplayLayout();
         this.resetObstacles();
         this.resetSecurityRoute();
         this.createMissionActors();
@@ -760,7 +919,7 @@ export class GameWorld {
             if (obstacle.box.x < startX - 4 && obstacle.destructible) { obstacle.active = false; obstacle.root.setEnabled(false); obstacle.hp = 0; }
         }
         this.securityDoors.forEach((door) => {
-            if (door.box.x < startX) { door.open = true; door.root.position.y = door.closedY + 5.2; door.box.y = door.closedY + 5.2; }
+            if (door.box.x < startX) { door.open = true; door.root.position.y = door.closedY + 5.2; door.box.y = door.closedY + 5.2; this.setDoorPanelState(door, true); }
         });
         this.securitySwitches.forEach((switchNode) => {
             if (switchNode.box.x < startX) {
@@ -793,6 +952,8 @@ export class GameWorld {
         this.bossMeter.root.setEnabled(false);
         this.previewAri.setEnabled(false);
         this.previewDax.setEnabled(false);
+        this.previewMika.setEnabled(false);
+        this.previewBrutus.setEnabled(false);
         this.brandMark.setEnabled(true);
         this.renderMenu();
     }
@@ -800,23 +961,47 @@ export class GameWorld {
         const previewVisible = this.state === "select";
         this.previewAri.setEnabled(previewVisible && this.selected === "ari");
         this.previewDax.setEnabled(previewVisible && this.selected === "dax");
-        this.brandMark.setEnabled(this.state !== "play");
+        this.previewMika.setEnabled(previewVisible && this.selected === "mika");
+        this.previewBrutus.setEnabled(previewVisible && this.selected === "brutus");
+        const menuLikeState = this.state !== "play";
+        const selectBackdropState = this.state === "select";
+        const actionDecorVisible = this.state === "menu" || this.state === "story" || this.state === "credits";
+        this.menuBackdropMain.setEnabled(menuLikeState && !selectBackdropState);
+        this.menuBackdropSelect.setEnabled(menuLikeState && selectBackdropState);
+        this.menuLogo.setEnabled(menuLikeState);
+        this.menuHeliDecor.setEnabled(actionDecorVisible);
+        this.menuJeepDecor.setEnabled(actionDecorVisible);
+        this.menuSoldierDecorA.setEnabled(actionDecorVisible);
+        this.menuSoldierDecorB.setEnabled(actionDecorVisible);
+        this.characterCards.forEach((card) => {
+            const selected = previewVisible && card.id === this.selected;
+            card.root.setEnabled(previewVisible);
+            card.glow.setEnabled(selected);
+            card.root.scaling.setAll(selected ? 1.08 : 1);
+        });
+        this.brandMark.setEnabled(this.state !== "play" && this.state !== "menu" && this.state !== "select");
         if (this.state === "menu") {
             const save = this.save.snapshot;
-            this.menuBoard.setText("PIXEL FRONTIER", ["CONTINUAR CAMPANHA", "SELECIONAR OPERAÇÃO", "MANUAL DE CAMPO", `OPÇÕES // ${QUALITY_OPTIONS[this.qualityIndex].label}`, "CONTROLES", "CRÉDITOS", `FASES LIBERADAS ${save.unlockedLevel}/${LEVELS.length} // ${getLevel(this.currentLevel).name}`], this.menuIndex);
+            this.menuBoard.setText("CENTRO DE COMANDO", ["CONTINUAR CAMPANHA", "SELECIONAR OPERAÇÃO", "ESCOLHER PERSONAGEM", `OPÇÕES // ${QUALITY_OPTIONS[this.qualityIndex].label}`, "CONTROLES", "CRÉDITOS", `FASES LIBERADAS ${save.unlockedLevel}/${LEVELS.length} // ${getLevel(this.currentLevel).name}`], this.menuIndex);
         }
         else if (this.state === "select") {
             const data = CHARACTERS[this.selected];
-            const other = this.selected === "ari" ? CHARACTERS.dax : CHARACTERS.ari;
-            this.menuBoard.setText("ESCOLHA O BATEDOR", [
+            const index = Math.max(0, CHARACTER_ORDER.indexOf(this.selected));
+            const previous = CHARACTERS[CHARACTER_ORDER[(index + CHARACTER_ORDER.length - 1) % CHARACTER_ORDER.length]];
+            const next = CHARACTERS[CHARACTER_ORDER[(index + 1) % CHARACTER_ORDER.length]];
+            this.menuBoard.setText(`ESCOLHA O PERSONAGEM // ${index + 1}/4`, [
                 `${data.name} // ${data.role.toUpperCase()}`,
                 `${data.callSign}`,
-                `VELOCIDADE ${"■".repeat(Math.round(data.speed / 2))}   PULSO ${"■".repeat(data.id === "ari" ? 5 : 4)}`,
+                `VELOCIDADE ${"■".repeat(Math.max(1, Math.round(data.speed / 2)))}   CADÊNCIA ${"■".repeat(Math.max(1, Math.round((0.30 - data.fireRate) * 28)))}`,
                 `GRANADAS ${data.grenades}   BLINDAGEM ${data.maxHealth}`,
-                data.id === "ari" ? "RAJADAS CURTAS. TRÊS GRANADAS." : "PULSOS PESADOS. QUATRO GRANADAS.",
-                `DIFICULDADE ${this.difficulty.toUpperCase()}   ↑/↓ ALTERA`,
-                `←/→ ${other.name}   |   ENTER: PARTIR   |   ESC: VOLTAR`,
+                data.description.toUpperCase(),
+                `CARTÕES TÁTICOS À ESQUERDA // DIFICULDADE ${this.difficulty.toUpperCase()}`,
+                `← ${previous.name}   ${next.name} →   |   ENTER: PARTIR`,
             ]);
+        }
+        else if (this.state === "story") {
+            const page = STORY_PAGES[Math.max(0, Math.min(STORY_PAGES.length - 1, this.storyPage))];
+            this.menuBoard.setText(page.title, page.lines);
         }
         else if (this.state === "levelselect") {
             const save = this.save.snapshot;
@@ -862,7 +1047,23 @@ export class GameWorld {
             const level = getLevel(this.currentLevel);
             const bars = Math.max(0, Math.min(20, Math.round(this.loadingProgress * 20)));
             this.menuBoard.setText(`OPERAÇÃO ${String(level.id).padStart(2, "0")} // ${level.name}`, [
-                level.operation, level.objective, "", `CARREGANDO ${"■".repeat(bars)}${"□".repeat(20 - bars)} ${Math.round(this.loadingProgress * 100)}%`, this.loadingLabel.toUpperCase(), "PREPARANDO ZONA DE COMBATE..."
+                level.operation,
+                level.briefing?.toUpperCase?.() ?? level.objective,
+                level.objective,
+                `CARREGANDO ${"■".repeat(bars)}${"□".repeat(20 - bars)} ${Math.round(this.loadingProgress * 100)}%`,
+                this.loadingLabel.toUpperCase(),
+                "CARREGANDO ASSETS EXCLUSIVOS DA FASE..."
+            ]);
+        }
+        else if (this.state === "missionstart") {
+            const level = getLevel(this.currentLevel);
+            const data = CHARACTERS[this.selected];
+            this.menuBoard.setText("INICIAR MISSÃO", [
+                `OPERAÇÃO ${String(level.id).padStart(2, "0")} // ${level.name}`,
+                level.operation,
+                level.objective,
+                `SOLDADO: ${data.name}`,
+                "PREPARE-SE PARA O COMBATE.",
             ]);
         }
         else if (this.state === "pause") {
@@ -908,6 +1109,8 @@ export class GameWorld {
         this.bossMeter.root.setEnabled(false);
         this.previewAri.setEnabled(false);
         this.previewDax.setEnabled(false);
+        this.previewMika.setEnabled(false);
+        this.previewBrutus.setEnabled(false);
         this.brandMark.setEnabled(true);
         this.renderMenu();
         this.clearInputs();
@@ -942,6 +1145,16 @@ export class GameWorld {
         this.loadingProgress = 1;
         this.loadingLabel = "PRONTO";
         this.renderMenu();
+        this.state = "missionstart";
+        this.missionStartTimer = window.setTimeout(() => this.enterGameplayFromMissionStart(), 1500);
+        this.renderMenu();
+    }
+    enterGameplayFromMissionStart() {
+        if (this.state !== "missionstart") return;
+        if (this.missionStartTimer) {
+            window.clearTimeout(this.missionStartTimer);
+            this.missionStartTimer = 0;
+        }
         this.state = "play";
         this.menuBoard.visible(false);
         this.hudBoard.visible(true);
@@ -1060,7 +1273,13 @@ export class GameWorld {
             }
             if (key === "enter" || rawKey === " ") {
                 if (this.menuIndex === 0) {
-                    this.state = "select";
+                    const save = this.save.snapshot;
+                    if ((save.unlockedLevel || 1) <= 1 && (save.currentLevel || 1) <= 1) {
+                        this.storyPage = 0;
+                        this.state = "story";
+                    } else {
+                        this.state = "select";
+                    }
                     this.renderMenu();
                 }
                 if (this.menuIndex === 1) {
@@ -1069,7 +1288,7 @@ export class GameWorld {
                     this.renderMenu();
                 }
                 if (this.menuIndex === 2) {
-                    this.state = "manual";
+                    this.state = "select";
                     this.renderMenu();
                 }
                 if (this.menuIndex === 3) {
@@ -1113,9 +1332,24 @@ export class GameWorld {
                 this.showMenu();
             return;
         }
+        if (this.state === "story") {
+            if (key === "enter" || rawKey === " ") {
+                if (this.storyPage < STORY_PAGES.length - 1) {
+                    this.storyPage += 1;
+                    this.renderMenu();
+                } else {
+                    this.state = "select";
+                    this.renderMenu();
+                }
+            }
+            if (key === "escape") this.showMenu();
+            return;
+        }
         if (this.state === "select") {
             if (key === "arrowleft" || key === "arrowright") {
-                this.selected = this.selected === "ari" ? "dax" : "ari";
+                const index = Math.max(0, CHARACTER_ORDER.indexOf(this.selected));
+                const dir = key === "arrowright" ? 1 : -1;
+                this.selected = CHARACTER_ORDER[(index + dir + CHARACTER_ORDER.length) % CHARACTER_ORDER.length];
                 this.renderMenu();
             }
             if (key === "arrowup" || key === "arrowdown") {
@@ -1129,6 +1363,11 @@ export class GameWorld {
                 void this.startMission(this.currentLevel, true);
             if (key === "escape")
                 this.showMenu();
+            return;
+        }
+        if (this.state === "missionstart") {
+            if (key === "enter" || rawKey === " ") this.enterGameplayFromMissionStart();
+            if (key === "escape") this.showMenu();
             return;
         }
         if (this.state === "quality") {
@@ -1348,6 +1587,7 @@ export class GameWorld {
         }
         this.positionUi(dt);
         this.updateQualityDecor();
+        this.animateMenuDecor(dt);
         if (this.state !== "play")
             return;
         this.updateMission(dt);
@@ -1359,6 +1599,28 @@ export class GameWorld {
             mote.mesh.position.y = mote.y + Math.sin(this.elapsed * 0.72 + mote.phase) * 0.24;
             mote.mesh.position.x = mote.x + Math.cos(this.elapsed * 0.32 + mote.phase) * 0.38;
             mote.mesh.scaling.setAll(0.78 + Math.max(0, Math.sin(this.elapsed * 1.7 + mote.phase)) * 0.45);
+        });
+    }
+    animateMenuDecor(dt) {
+        const heroFrame = Math.floor(this.elapsed * 8) % 8;
+        const vehicleFrame = Math.floor(this.elapsed * 7) % 4;
+        [this.previewAri, this.previewDax, this.previewMika, this.previewBrutus].forEach((root, index) => {
+            setAssetFrame(root, heroFrame + index);
+            root.position.y = -0.8 + Math.sin(this.elapsed * 2.2 + index * 0.5) * 0.06;
+        });
+        setAssetFrame(this.menuSoldierDecorA, heroFrame);
+        setAssetFrame(this.menuSoldierDecorB, heroFrame + 2);
+        setAssetFrame(this.menuJeepDecor, vehicleFrame);
+        setAssetFrame(this.menuHeliDecor, vehicleFrame);
+        this.menuHeliDecor.position.x = -7.2 + Math.sin(this.elapsed * 0.45) * 0.55;
+        this.menuHeliDecor.position.y = 2.9 + Math.sin(this.elapsed * 1.2) * 0.18;
+        this.menuJeepDecor.position.y = -4.85 + Math.sin(this.elapsed * 1.8) * 0.04;
+        this.menuSoldierDecorA.position.y = -4.8 + Math.sin(this.elapsed * 3.0) * 0.05;
+        this.menuSoldierDecorB.position.y = -4.8 + Math.sin(this.elapsed * 3.0 + 0.6) * 0.05;
+        this.characterCards.forEach((card, index) => {
+            const baseY = card.root.metadata?.baseY ?? card.root.position.y;
+            card.root.position.y = baseY + (card.id === this.selected && this.state === "select" ? Math.sin(this.elapsed * 3.2 + index) * 0.08 : 0);
+            card.stripe.scaling.x = card.id === this.selected && this.state === "select" ? 1.1 + Math.sin(this.elapsed * 4.8) * 0.06 : 1;
         });
     }
     animatePart(root, tag, offsetX, offsetY) {
@@ -1373,6 +1635,31 @@ export class GameWorld {
     }
     setPartVisible(root, tag, visible) {
         root.getChildMeshes().find((mesh) => mesh.name === `${root.name}-${tag}`)?.setEnabled(visible);
+    }
+    setDoorPanelState(door, open) {
+        this.setPartVisible(door.root, "signal-off", !open);
+        this.setPartVisible(door.root, "signal-on", open);
+        this.setPartVisible(door.root, "panel-off", !open);
+        this.setPartVisible(door.root, "panel-on", open);
+        this.setPartVisible(door.root, "panel-right-off", !open);
+        this.setPartVisible(door.root, "panel-right-on", open);
+    }
+    resolveEnemySecurityDoors(enemy, previousX) {
+        // Soldados respeitam as mesmas portas que bloqueiam o jogador.
+        // Drones voam acima do batente e continuam podendo atravessar pelo alto.
+        if (enemy.kind === "drone") return false;
+        const enemyBox = this.enemyBox(enemy);
+        for (const door of this.securityDoors) {
+            if (door.open || !this.overlaps(enemyBox, door.box)) continue;
+            if (previousX <= door.box.x) {
+                enemy.x = door.box.x - door.box.halfWidth - enemyBox.halfWidth - 0.03;
+            } else {
+                enemy.x = door.box.x + door.box.halfWidth + enemyBox.halfWidth + 0.03;
+            }
+            enemy.root.position.x = enemy.x;
+            return true;
+        }
+        return false;
     }
     overlaps(a, b) {
         return Math.abs(a.x - b.x) <= a.halfWidth + b.halfWidth && Math.abs(a.y - b.y) <= a.halfHeight + b.halfHeight;
@@ -1390,42 +1677,36 @@ export class GameWorld {
         return { x: this.player.x + template.x, y: this.player.y + template.y, halfWidth: template.halfWidth, halfHeight: template.halfHeight };
     }
     resetSecurityRoute() {
-        this.securityNotice = "SETOR A: ABRIR BARRICADA";
-        this.securitySwitches.forEach((switchNode) => {
-            switchNode.activated = false;
-            this.setPartVisible(switchNode.root, "lamp-off", true);
-            this.setPartVisible(switchNode.root, "lamp-on", false);
-            switchNode.root.scaling.setAll(1);
-        });
+        this.securityNotice = "PORTAS DE SEGURANÇA: APROXIME-SE E PRESSIONE E";
         this.securityDoors.forEach((door) => {
             door.open = false;
             door.root.position.y = door.closedY;
             door.box.y = door.closedY;
             door.root.setEnabled(true);
+            this.setDoorPanelState(door, false);
         });
         this.groundTraps.forEach((trap) => {
             trap.cooldown = 0;
             trap.root.scaling.setAll(1);
         });
     }
-    updateSecurityRoute(dt) {
-        const activationRequested = this.isPressed("e") || (this.demoSecurity && this.demoTime > 0.45 && this.demoTime < 1.2);
-        for (const switchNode of this.securitySwitches) {
-            if (!switchNode.activated && activationRequested && this.overlaps(this.activePlayerBox(), switchNode.box)) {
-                switchNode.activated = true;
-                this.setPartVisible(switchNode.root, "lamp-off", false);
-                this.setPartVisible(switchNode.root, "lamp-on", true);
-                switchNode.root.scaling.setAll(1.12);
-                const door = this.securityDoors.find((candidate) => candidate.id === switchNode.doorId);
-                if (door) {
+    updateSecurityRoute(dt, interact = false) {
+        const playerBox = this.activePlayerBox();
+        let nearClosedDoor = null;
+        for (const door of this.securityDoors) {
+            if (!door.open && this.overlaps(playerBox, door.interactionBox)) {
+                nearClosedDoor = door;
+                this.securityNotice = `E: ABRIR ${door.label}`;
+                if (interact || (this.demoSecurity && this.demoTime > 0.45 && this.demoTime < 1.2)) {
                     door.open = true;
-                    this.securityNotice = `${switchNode.id === "console-alpha" ? "CIRCUITO A" : "CIRCUITO B"}: PORTA LIBERADA`;
+                    this.setDoorPanelState(door, true);
+                    this.securityNotice = `${door.label}: ABERTA`;
+                    this.audio.sfxPlay("door");
                 }
             }
         }
         this.securityDoors.forEach((door) => {
-            if (!door.open)
-                return;
+            if (!door.open) return;
             const targetY = door.closedY + 5.4;
             door.root.position.y += (targetY - door.root.position.y) * Math.min(1, dt * 6.5);
             door.box.y = door.root.position.y;
@@ -1565,7 +1846,7 @@ export class GameWorld {
             this.grenadeTimer = 0.8;
         }
         this.player.invincible = Math.max(0, this.player.invincible - dt);
-        this.updateSecurityRoute(dt);
+        this.updateSecurityRoute(dt, interact);
         this.syncPlayerVisual();
         this.updateMissionVehicles(dt);
         this.updateEnemies(dt);
@@ -1597,8 +1878,8 @@ export class GameWorld {
         if (this.hasRover) {
             this.roverRoot.position.set(this.player.x, this.player.y - 0.05, 0.1);
             this.roverRoot.setEnabled(true);
-            this.animatePart(this.roverRoot, "wheel-left", 0, Math.sin(this.elapsed * 18) * 0.10);
-            this.animatePart(this.roverRoot, "wheel-right", 0, -Math.sin(this.elapsed * 18) * 0.10);
+            const roverMoving = moving && this.player.vy === 0;
+            setAssetFrame(this.roverRoot, this.shotFlash > 0 ? 3 : roverMoving ? (Math.floor(this.elapsed * 12) % 3) : 0);
         }
         else if (this.roverAvailable)
             this.roverRoot.setEnabled(true);
@@ -1616,6 +1897,7 @@ export class GameWorld {
                 enemy.root.setEnabled(true);
                 this.spawnCombatFx(enemy.entryX + 1.4, enemy.kind === "drone" ? enemy.y : -4.9, "smoke");
             }
+            const previousEnemyX = enemy.x;
             enemy.cooldown -= dt;
             if (enemy.entering) {
                 if (enemy.kind === "drone") {
@@ -1639,30 +1921,59 @@ export class GameWorld {
             if (enemy.kind === "drone") {
                 enemy.root.position.y = enemy.y + Math.sin(this.elapsed * 2.2 + enemy.drift) * 0.42;
                 enemy.root.rotation.z = Math.sin(this.elapsed * 3.1 + enemy.drift) * 0.08;
-                this.animatePart(enemy.root, "wing-left", 0, Math.sin(this.elapsed * 9 + enemy.drift) * 0.08);
-                this.animatePart(enemy.root, "wing-right", 0, -Math.sin(this.elapsed * 9 + enemy.drift) * 0.08);
+                setAssetFrame(enemy.root, Math.floor(this.elapsed * 12 + enemy.drift) % 3);
             }
             const distance = this.player.x - enemy.x;
-            if (enemy.kind === "sentry" && Math.abs(distance) < 10 && Math.abs(distance) > 4.2) {
-                enemy.x += Math.sign(distance) * dt * 0.92;
-                enemy.root.position.x = enemy.x;
-                enemy.root.scaling.x = Math.sign(distance);
-            }
             if (enemy.kind === "sentry") {
-                const running = Math.abs(distance) < 10 && Math.abs(distance) > 4.2;
+                const preferred = enemy.role === "sniper" ? 8.8 : enemy.role === "grenadier" ? 7.2 : enemy.role === "machinegunner" ? 5.5 : enemy.role === "shield" ? 3.6 : 4.2;
+                const chaseRange = enemy.role === "sniper" ? 15 : 10;
+                const moveSpeed = enemy.role === "shield" ? 0.62 : enemy.role === "machinegunner" ? 0.72 : enemy.role === "sniper" ? 0.48 : 0.92;
+                if (Math.abs(distance) < chaseRange && Math.abs(distance) > preferred) {
+                    enemy.x += Math.sign(distance) * dt * moveSpeed;
+                    enemy.root.position.x = enemy.x;
+                    enemy.root.scaling.x = Math.sign(distance) * Math.abs(enemy.root.scaling.x || 1);
+                }
+                const running = Math.abs(distance) < chaseRange && Math.abs(distance) > preferred;
                 const frame = enemy.cooldown < 0.16 ? 5 : running ? 1 + (Math.floor(this.elapsed * 10 + enemy.drift * 2) % 4) : 0;
                 setAssetFrame(enemy.root, frame);
             }
-            if (enemy.cooldown <= 0 && Math.abs(enemy.x - this.player.x) < 13) {
+            this.resolveEnemySecurityDoors(enemy, previousEnemyX);
+            if (enemy.cooldown <= 0 && Math.abs(enemy.x - this.player.x) < (enemy.role === "sniper" ? 17 : 13)) {
                 const direction = this.player.x < enemy.x ? -1 : 1;
-                this.spawnProjectile(enemy.x + direction * 0.82, enemy.root.position.y + 0.25, direction * (enemy.kind === "drone" ? 10 : 8.6), 0, false, 1, false);
-                this.spawnCombatFx(enemy.x + direction * 0.92, enemy.root.position.y + 0.25, "hit");
-                enemy.cooldown = (enemy.kind === "drone" ? 1.35 : 1.55) * (enemy.fireScale ?? 1);
+                const muzzleX = enemy.x + direction * 0.82;
+                const muzzleY = enemy.root.position.y + 0.25;
+                if (enemy.kind === "drone") {
+                    this.spawnProjectile(muzzleX, muzzleY, direction * 10, -0.25, false, 1, false);
+                    enemy.cooldown = 1.35 * (enemy.fireScale ?? 1);
+                }
+                else if (enemy.role === "grenadier") {
+                    this.spawnProjectile(muzzleX, muzzleY + 0.2, direction * 6.6, 5.8, false, 2, true);
+                    enemy.cooldown = 2.15 * (enemy.fireScale ?? 1);
+                }
+                else if (enemy.role === "machinegunner") {
+                    for (let burst = -1; burst <= 1; burst += 1)
+                        this.spawnProjectile(muzzleX, muzzleY + burst * 0.08, direction * (9.3 + burst * 0.35), burst * 0.35, false, 1, false);
+                    enemy.cooldown = 1.05 * (enemy.fireScale ?? 1);
+                }
+                else if (enemy.role === "sniper") {
+                    this.spawnProjectile(muzzleX, muzzleY + 0.15, direction * 15.5, 0, false, 2, false);
+                    enemy.cooldown = 2.35 * (enemy.fireScale ?? 1);
+                }
+                else if (enemy.role === "shield") {
+                    this.spawnProjectile(muzzleX, muzzleY, direction * 7.2, 0, false, 1, false);
+                    enemy.cooldown = 1.75 * (enemy.fireScale ?? 1);
+                }
+                else {
+                    this.spawnProjectile(muzzleX, muzzleY, direction * 8.6, 0, false, 1, false);
+                    enemy.cooldown = 1.55 * (enemy.fireScale ?? 1);
+                }
+                this.spawnCombatFx(enemy.x + direction * 0.92, muzzleY, "hit");
             }
         }
     }
     updateRescues() {
         for (const rescue of this.rescues) {
+            if (rescue.active) setAssetFrame(rescue.root, Math.floor(this.elapsed * 4 + rescue.x) % 4);
             const rescueBox = { x: rescue.x, y: rescue.root.position.y, halfWidth: 0.40, halfHeight: 0.84 };
             if (rescue.active && this.overlaps(this.activePlayerBox(), rescueBox)) {
                 rescue.active = false;
@@ -1684,14 +1995,22 @@ export class GameWorld {
         const ratio = this.boss.hp / Math.max(1, this.boss.maxHp);
         const phase = ratio > 0.70 ? 1 : ratio > 0.40 ? 2 : ratio > 0.15 ? 3 : 4;
         const bossFireScale = getLevel(this.currentLevel).enemyFireScale * (this.difficulty === "easy" ? 1.18 : this.difficulty === "hard" ? 0.82 : 1);
-        const baseY = -4.68 + Math.sin(this.elapsed * (1.6 + phase * 0.18)) * 0.12;
+        const bossProfile = this.currentLevel <= 4 ? this.currentLevel : ((this.currentLevel - 1) % 4) + 1;
+        const baseY = bossProfile === 3
+            ? -4.25 + Math.sin(this.elapsed * (1.9 + phase * 0.22)) * 0.32
+            : -4.68 + Math.sin(this.elapsed * (1.6 + phase * 0.18)) * 0.12;
         this.bossRoot.position.y = baseY;
-        if (phase >= 2)
+        if (bossProfile === 2)
+            this.bossRoot.position.x = 84 + Math.sin(this.elapsed * (0.95 + phase * 0.08)) * (phase === 4 ? 3.0 : 1.7);
+        else if (bossProfile === 4 && phase >= 2)
+            this.bossRoot.position.x = 84 + Math.sin(this.elapsed * 0.58) * (phase === 4 ? 2.4 : 1.2);
+        else if (phase >= 2)
             this.bossRoot.position.x = 84 + Math.sin(this.elapsed * 0.65) * (phase === 4 ? 2.0 : 1.0);
         const warningPulse = 1 + Math.max(0, Math.sin(this.elapsed * (5.2 + phase))) * (0.025 + phase * 0.008);
         this.bossRoot.scaling.setAll(warningPulse);
-        const bossFrame = ratio < 0.25 ? 5 : ratio < 0.55 ? 4 : this.boss.cooldown < 0.22 ? 3 : Math.floor(this.elapsed * 2.2) % 3;
-        setAssetFrame(this.bossRoot, bossFrame);
+        const bossArc = this.currentLevel <= 4 ? 0 : this.currentLevel <= 8 ? 1 : 2;
+        const bossFrameLocal = ratio < 0.25 ? 5 : ratio < 0.55 ? 4 : this.boss.cooldown < 0.22 ? 3 : Math.floor(this.elapsed * 2.2) % 3;
+        setAssetFrame(this.bossRoot, bossArc * 6 + bossFrameLocal);
         this.boss.cooldown -= dt;
         if (!this.bossPhaseSpawned.has(phase)) {
             this.bossPhaseSpawned.add(phase);
@@ -1704,37 +2023,78 @@ export class GameWorld {
                 this.spawnReinforcementSoldier(77.5, "boss3a");
             }
             if (phase === 4) {
-                this.spawnCombatFx(83.4, -4.0, "explosion");
+                this.spawnCombatFx(83.4, -4.0, "vehicleExplosion");
                 this.cameraShake = 0.28;
             }
         }
         if (this.boss.cooldown <= 0) {
             const direction = this.player.x < this.bossRoot.position.x ? -1 : 1;
-            if (phase === 1) {
-                this.spawnProjectile(this.bossRoot.position.x + direction * -2.2, -4.5, direction * 9, 0.8, false, 1, false);
-                this.boss.cooldown = 1.15 * bossFireScale;
-            }
-            else if (phase === 2) {
-                this.spawnProjectile(this.bossRoot.position.x - 2.2, -4.15, direction * 8.5, 5.4, false, 1, true);
-                this.spawnProjectile(this.bossRoot.position.x - 1.4, -4.05, direction * 9.2, 6.4, false, 1, true);
-                this.boss.cooldown = 1.45 * bossFireScale;
-            }
-            else if (phase === 3) {
-                for (let i = -1; i <= 1; i += 1)
-                    this.spawnProjectile(this.bossRoot.position.x - 2.1, -4.45 + i * 0.35, direction * (10 + i), i * 1.1, false, 1, false);
-                this.boss.cooldown = 0.82 * bossFireScale;
-            }
-            else {
-                this.spawnProjectile(this.bossRoot.position.x - 2.1, -4.3, direction * 12, Math.sin(this.elapsed * 4) * 2.4, false, 1, false);
-                if (Math.floor(this.elapsed * 2) % 2 === 0)
-                    this.spawnProjectile(this.bossRoot.position.x - 1.8, -3.9, direction * 9, 6.8, false, 1, true);
-                this.boss.cooldown = 0.46 * bossFireScale;
+            const bx = this.bossRoot.position.x;
+            const by = this.bossRoot.position.y;
+            if (bossArc === 0) {
+                if (bossProfile === 1) {
+                    if (phase <= 2) {
+                        this.spawnProjectile(bx + direction * -2.2, by + 0.2, direction * 9.4, phase === 2 ? 1.1 : 0.35, false, 1, false);
+                        if (phase === 2) this.spawnProjectile(bx - 1.6, by + 0.55, direction * 7.2, 5.5, false, 1, true);
+                        this.boss.cooldown = (phase === 1 ? 1.12 : 1.28) * bossFireScale;
+                    } else {
+                        for (let i = -1; i <= 1; i += 1) this.spawnProjectile(bx - 2.0, by + 0.2 + i * 0.24, direction * (10.5 + i), i * 0.8, false, 1, false);
+                        if (phase === 4) this.spawnProjectile(bx - 1.4, by + 0.65, direction * 8.3, 6.8, false, 1, true);
+                        this.boss.cooldown = (phase === 3 ? 0.78 : 0.48) * bossFireScale;
+                    }
+                }
+                else if (bossProfile === 2) {
+                    this.spawnProjectile(bx - 2.1, by + 0.45, direction * 11.2, Math.sin(this.elapsed * 3.2) * 1.2, false, 1, false);
+                    if (phase >= 2) this.spawnProjectile(bx - 1.4, by + 0.75, direction * 8.6, 6.2, false, 1, true);
+                    if (phase >= 3) this.spawnProjectile(bx - 1.0, by + 0.25, direction * 12.5, -1.1, false, 1, false);
+                    this.boss.cooldown = (phase === 4 ? 0.44 : phase === 3 ? 0.66 : 0.95) * bossFireScale;
+                }
+                else if (bossProfile === 3) {
+                    this.spawnProjectile(bx - 1.8, by + 0.6, direction * 7.1, 6.8 + phase * 0.55, false, 1, true);
+                    if (phase >= 2) this.spawnProjectile(bx - 1.0, by + 0.25, direction * 8.0, 5.6, false, 1, true);
+                    if (phase >= 3) this.spawnProjectile(bx - 2.0, by + 0.15, direction * 10.2, Math.sin(this.elapsed * 2.5) * 1.8, false, 1, false);
+                    this.boss.cooldown = (phase === 4 ? 0.62 : 1.25) * bossFireScale;
+                }
+                else {
+                    const shots = phase === 1 ? 2 : phase === 2 ? 3 : 4;
+                    for (let i = 0; i < shots; i += 1) {
+                        const spread = (i - (shots - 1) / 2) * 0.72;
+                        this.spawnProjectile(bx - 2.1, by + 0.15 + spread * 0.18, direction * (10.8 + i * 0.4), spread, false, phase === 4 ? 1.4 : 1, false);
+                    }
+                    if (phase >= 3) this.spawnProjectile(bx - 1.5, by + 0.7, direction * 8.5, 6.6, false, 1, true);
+                    this.boss.cooldown = (phase === 4 ? 0.42 : phase === 3 ? 0.68 : 0.98) * bossFireScale;
+                }
+            } else if (bossArc === 1) {
+                const bursts = phase >= 3 ? 4 : 3;
+                for (let i = 0; i < bursts; i += 1) {
+                    const spread = (i - (bursts - 1) / 2) * 0.4;
+                    this.spawnProjectile(bx - 1.7, by + 0.35 + spread * 0.12, direction * (11.2 + i * 0.35), spread, false, 1, false);
+                }
+                if (phase >= 2) this.spawnProjectile(bx - 1.1, by + 0.75, direction * 8.8, 5.8 + phase * 0.4, false, 1, true, "rocket");
+                if (phase === 4) {
+                    this.spawnProjectile(bx - 0.9, by - 0.15, direction * 13.2, -0.3, false, 1, false);
+                    this.spawnProjectile(bx - 0.9, by + 0.05, direction * 13.2, 0.2, false, 1, false);
+                }
+                this.boss.cooldown = (phase === 4 ? 0.46 : phase === 3 ? 0.70 : 0.96) * bossFireScale;
+            } else {
+                const fan = phase === 1 ? 4 : phase === 2 ? 5 : 6;
+                for (let i = 0; i < fan; i += 1) {
+                    const spread = (i - (fan - 1) / 2) * 0.58;
+                    this.spawnProjectile(bx - 2.2, by + 0.12 + spread * 0.14, direction * (10.4 + i * 0.22), spread, false, 1, false);
+                }
+                if (phase >= 2) this.spawnProjectile(bx - 1.4, by + 0.72, direction * 7.2, 6.4, false, 1, true, "rocket");
+                if (phase >= 3) {
+                    this.spawnProjectile(bx - 1.2, by - 0.05, direction * 9.0, 0, false, 1, false, "flame");
+                    this.spawnProjectile(bx - 1.2, by + 0.22, direction * 9.0, 0.5, false, 1, false, "flame");
+                }
+                if (phase === 4) this.spawnProjectile(bx - 0.8, by + 0.92, direction * 8.3, 7.2, false, 1, true);
+                this.boss.cooldown = (phase === 4 ? 0.40 : phase === 3 ? 0.58 : 0.88) * bossFireScale;
             }
         }
     }
     warmCombatFxPools() {
         const mode = this.quality === "auto" ? this.autoQualityMode : this.quality;
-        const targets = mode === "low" ? { explosion: 3, hit: 6, smoke: 4 } : mode === "high" ? { explosion: 8, hit: 16, smoke: 10 } : { explosion: 5, hit: 10, smoke: 6 };
+        const targets = mode === "low" ? { explosion: 4, hit: 6, smoke: 4, muzzleFlash: 8, enemyDeathRifle: 3, enemyDeathGrenadier: 2, enemyDeathMachinegunner: 2, enemyDeathSniper: 2, enemyDeathShield: 2, vehicleExplosion: 2 } : mode === "high" ? { explosion: 10, hit: 16, smoke: 10, muzzleFlash: 18, enemyDeathRifle: 6, enemyDeathGrenadier: 4, enemyDeathMachinegunner: 4, enemyDeathSniper: 4, enemyDeathShield: 4, vehicleExplosion: 6 } : { explosion: 6, hit: 10, smoke: 6, muzzleFlash: 12, enemyDeathRifle: 4, enemyDeathGrenadier: 3, enemyDeathMachinegunner: 3, enemyDeathSniper: 3, enemyDeathShield: 3, vehicleExplosion: 4 };
         for (const [kind, target] of Object.entries(targets)) {
             const pool = this.combatFxPool[kind] ?? (this.combatFxPool[kind] = []);
             while (pool.length < target) {
@@ -1746,18 +2106,42 @@ export class GameWorld {
     }
     createCombatFxRoot(kind) {
         const id = Math.random().toString(36).slice(2);
-        const root = kind === "explosion"
-            ? assetSheetSprite(this.scene, `explosion-${id}`, `./assets/explosion_sheet.png`, 10, 2.45, 2.45, -1.2)
-            : kind === "hit"
-                ? sprite(this.scene, `hit-${id}`, [
-                    { tag: "spark-a", x: 0, y: 0, width: 0.16, height: 0.72, color: "#f7d36c" },
-                    { tag: "spark-b", x: 0, y: 0, width: 0.72, height: 0.16, color: "#f08a2e" },
-                    { tag: "spark-c", x: 0.22, y: 0.22, width: 0.26, height: 0.26, color: "#fff1b0" },
-                ], -1.15)
-                : sprite(this.scene, `smoke-${id}`, [
-                    { tag: "smoke-a", x: -0.20, y: 0, width: 0.62, height: 0.62, color: "#5d5b57" },
-                    { tag: "smoke-b", x: 0.25, y: 0.18, width: 0.78, height: 0.78, color: "#77736d" },
-                ], -1.1);
+        const deathFiles = {
+            enemyDeathRifle: "./assets/enemy_death_rifle_sheet.png",
+            enemyDeathGrenadier: "./assets/enemy_death_grenadier_sheet.png",
+            enemyDeathMachinegunner: "./assets/enemy_death_machinegunner_sheet.png",
+            enemyDeathSniper: "./assets/enemy_death_sniper_sheet.png",
+            enemyDeathShield: "./assets/enemy_death_shield_sheet.png",
+        };
+        let root;
+        if (kind === "vehicleExplosion") {
+            root = assetSheetSprite(this.scene, `vehicle-explosion-${id}`, `./assets/vehicle_explosion_sheet.png`, 12, 3.2, 3.2, -1.22);
+        } else if (deathFiles[kind]) {
+            root = assetSheetSprite(this.scene, `${kind}-${id}`, deathFiles[kind], 8, 2.5, 2.5, -1.18);
+        } else if (kind === "explosion") {
+            root = assetSheetSprite(this.scene, `explosion-${id}`, `./assets/explosion_sheet.png`, 12, 2.45, 2.45, -1.2);
+        } else if (kind === "muzzleFlash") {
+            root = sprite(this.scene, `muzzle-${id}`, [
+                { tag: "flash-a", x: 0.06, y: 0, width: 0.70, height: 0.16, color: "#f08a2e" },
+                { tag: "flash-b", x: 0.22, y: 0, width: 0.36, height: 0.12, color: "#f7d36c" },
+                { tag: "flash-c", x: 0.32, y: 0, width: 0.16, height: 0.08, color: "#fff1b0" },
+                { tag: "flash-d", x: -0.10, y: 0, width: 0.18, height: 0.10, color: "#ffd884" },
+            ], -1.12);
+        } else if (kind === "hit") {
+            root = sprite(this.scene, `hit-${id}`, [
+                { tag: "spark-a", x: 0, y: 0, width: 0.90, height: 0.12, color: "#f08a2e" },
+                { tag: "spark-b", x: 0, y: 0, width: 0.12, height: 0.90, color: "#f7d36c" },
+                { tag: "spark-c", x: 0.28, y: 0.20, width: 0.24, height: 0.24, color: "#fff1b0" },
+                { tag: "spark-d", x: -0.32, y: -0.24, width: 0.20, height: 0.20, color: "#ffd884" },
+                { tag: "spark-e", x: 0.42, y: -0.18, width: 0.28, height: 0.08, color: "#f5efd4" },
+            ], -1.15);
+        } else {
+            root = sprite(this.scene, `smoke-${id}`, [
+                { tag: "smoke-a", x: -0.34, y: 0.02, width: 0.70, height: 0.70, color: "#4f4b47" },
+                { tag: "smoke-b", x: 0.16, y: 0.18, width: 0.88, height: 0.88, color: "#716b64" },
+                { tag: "smoke-c", x: 0.48, y: -0.08, width: 0.50, height: 0.50, color: "#8b847b" },
+            ], -1.1);
+        }
         root.parent = this.worldRoot;
         return root;
     }
@@ -1767,7 +2151,7 @@ export class GameWorld {
         root.setEnabled(true);
         root.scaling.setAll(1);
         root.rotation.z = 0;
-        if (kind === "explosion") setAssetFrame(root, 0);
+        if (kind === "explosion" || kind === "vehicleExplosion" || kind.startsWith("enemyDeath")) setAssetFrame(root, 0);
         return root;
     }
     releaseCombatFx(fx) {
@@ -1776,11 +2160,12 @@ export class GameWorld {
         fx.root.rotation.z = 0;
         (this.combatFxPool[fx.kind] ?? (this.combatFxPool[fx.kind] = [])).push(fx.root);
     }
-    spawnCombatFx(x, y, kind) {
+    spawnCombatFx(x, y, kind, direction = 1) {
         const root = this.acquireCombatFx(kind);
         root.position.set(x, y, 0);
-        const maxLife = kind === "explosion" ? 0.48 : kind === "hit" ? 0.18 : 0.75;
-        if (kind === "explosion") this.cameraShake = Math.min(0.34, this.cameraShake + 0.14);
+        root.scaling.x = Math.sign(direction || 1) * Math.abs(root.scaling.x || 1);
+        const maxLife = kind === "vehicleExplosion" ? 0.70 : kind.startsWith("enemyDeath") ? 0.42 : kind === "explosion" ? 0.58 : kind === "muzzleFlash" ? 0.08 : kind === "hit" ? 0.18 : 0.75;
+        if (kind === "explosion" || kind === "vehicleExplosion") this.cameraShake = Math.min(0.38, this.cameraShake + (kind === "vehicleExplosion" ? 0.2 : 0.14));
         this.combatFx.push({ root, life: maxLife, maxLife, kind });
     }
     updateCombatFx(dt) {
@@ -1788,9 +2173,19 @@ export class GameWorld {
         for (const fx of this.combatFx) {
             fx.life -= dt;
             const progress = 1 - fx.life / fx.maxLife;
-            if (fx.kind === "explosion") {
-                setAssetFrame(fx.root, Math.min(9, Math.floor(progress * 10)));
+            if (fx.kind === "vehicleExplosion") {
+                setAssetFrame(fx.root, Math.min(11, Math.floor(progress * 12)));
+                fx.root.scaling.setAll(0.82 + Math.sin(Math.min(1, progress) * Math.PI) * 0.86);
+                fx.root.position.y += dt * 0.18;
+            } else if (fx.kind.startsWith("enemyDeath")) {
+                setAssetFrame(fx.root, Math.min(7, Math.floor(progress * 8)));
+                fx.root.scaling.setAll(0.88 + progress * 0.36);
+                fx.root.position.y += dt * 0.36;
+            } else if (fx.kind === "explosion") {
+                setAssetFrame(fx.root, Math.min(11, Math.floor(progress * 12)));
                 fx.root.scaling.setAll(0.70 + Math.sin(Math.min(1, progress) * Math.PI) * 0.62);
+            } else if (fx.kind === "muzzleFlash") {
+                fx.root.scaling.setAll(0.72 + Math.sin(Math.min(1, progress) * Math.PI) * 0.45);
             } else if (fx.kind === "hit") {
                 fx.root.scaling.setAll(0.7 + progress * 0.8);
                 fx.root.rotation.z += dt * 7;
@@ -1810,9 +2205,41 @@ export class GameWorld {
             mesh.setEnabled(true);
             mesh.position.set(x, y, -0.9);
             mesh.scaling.setAll(1);
+            mesh.rotation.z = 0;
             return mesh;
         }
-        const mesh = rect(this.scene, `bullet-${Math.random().toString(36).slice(2)}`, 0.42, burst ? 0.42 : 0.10, ally ? (burst ? "#f2c45f" : "#fff1b0") : "#e85b32", this.worldRoot, x, y, -0.9);
+        const id = Math.random().toString(36).slice(2);
+        const isRocket = style.includes("rocket");
+        const isGrenade = style.includes("grenade");
+        const isFlame = style.includes("flame");
+        const isEnemy = style.startsWith("enemy-");
+        const mesh = isRocket
+            ? sprite(this.scene, `rocket-${id}`, [
+                { tag: "trail", x: -0.26, y: 0, width: 0.28, height: 0.16, color: isEnemy ? "#e85b32" : "#f2c45f" },
+                { tag: "body", x: 0.04, y: 0, width: 0.56, height: 0.16, color: "#b8c3c7" },
+                { tag: "nose", x: 0.38, y: 0, width: 0.12, height: 0.12, color: isEnemy ? "#f08a2e" : "#fff1b0" },
+                { tag: "fin-a", x: -0.10, y: 0.12, width: 0.10, height: 0.10, color: "#5b6670" },
+                { tag: "fin-b", x: -0.10, y: -0.12, width: 0.10, height: 0.10, color: "#5b6670" },
+            ], -0.9)
+            : isGrenade
+                ? sprite(this.scene, `grenade-${id}`, [
+                    { tag: "body", x: 0, y: 0, width: 0.34, height: 0.34, color: isEnemy ? "#934f43" : "#b8a56a" },
+                    { tag: "cap", x: 0, y: 0.22, width: 0.12, height: 0.10, color: "#89979b" },
+                    { tag: "pin", x: 0.14, y: 0.22, width: 0.06, height: 0.06, color: "#f5efd4" },
+                ], -0.9)
+                : isFlame
+                    ? sprite(this.scene, `flame-${id}`, [
+                        { tag: "a", x: -0.08, y: 0, width: 0.42, height: 0.22, color: isEnemy ? "#e85b32" : "#f08a2e" },
+                        { tag: "b", x: 0.12, y: 0, width: 0.26, height: 0.16, color: "#f7d36c" },
+                        { tag: "c", x: 0.22, y: 0, width: 0.12, height: 0.10, color: "#fff1b0" },
+                    ], -0.9)
+                    : sprite(this.scene, `bullet-${id}`, [
+                        { tag: "trail", x: -0.10, y: 0, width: 0.18, height: 0.06, color: isEnemy ? "#f08a2e" : "#f2c45f" },
+                        { tag: "core", x: 0.06, y: 0, width: 0.26, height: 0.10, color: isEnemy ? "#e85b32" : "#fff1b0" },
+                        { tag: "tip", x: 0.20, y: 0, width: 0.08, height: 0.08, color: "#f5efd4" },
+                    ], -0.9);
+        mesh.parent = this.worldRoot;
+        mesh.position.set(x, y, -0.9);
         mesh.metadata = { ...(mesh.metadata ?? {}), poolStyle: style };
         return mesh;
     }
@@ -1824,6 +2251,7 @@ export class GameWorld {
     spawnProjectile(x, y, vx, vy, ally, damage, burst, behavior = burst ? "grenade" : "bullet") {
         const style = `${ally ? "ally" : "enemy"}-${behavior}`;
         const mesh = this.acquireProjectileMesh(style, x, y, ally, burst);
+        this.spawnCombatFx(x + Math.sign(vx || 1) * 0.18, y, "muzzleFlash", Math.sign(vx || 1));
         const gravity = behavior === "grenade" ? 14 : 0;
         const life = behavior === "flame" ? 0.55 : behavior === "rocket" ? 1.8 : burst ? 1.45 : 1.8;
         const large = behavior === "grenade" || behavior === "rocket";
@@ -1834,6 +2262,76 @@ export class GameWorld {
             halfWidth: large ? 0.48 : flame ? 0.42 : 0.18, halfHeight: large ? 0.48 : flame ? 0.28 : 0.12, hitTargets: new Set()
         });
     }
+    deathFxKindForEnemy(enemy) {
+        if (enemy.kind === "drone") return "vehicleExplosion";
+        const map = {
+            rifle: "enemyDeathRifle",
+            grenadier: "enemyDeathGrenadier",
+            machinegunner: "enemyDeathMachinegunner",
+            sniper: "enemyDeathSniper",
+            shield: "enemyDeathShield",
+        };
+        return map[enemy.role] ?? "enemyDeathRifle";
+    }
+    defeatEnemy(enemy) {
+        enemy.alive = false;
+        enemy.root.setEnabled(false);
+        this.spawnCombatFx(enemy.x, enemy.root.position.y, this.deathFxKindForEnemy(enemy));
+        if (enemy.kind === "drone") this.spawnCombatFx(enemy.x, enemy.root.position.y + 0.4, "smoke");
+        this.player.score += enemy.kind === "drone" ? 300 : 500;
+    }
+    applyExplosionDamage(projectile) {
+        const radius = projectile.behavior === "rocket" ? 2.35 : 1.85;
+        const damage = projectile.damage * (projectile.behavior === "rocket" ? 0.85 : 0.7);
+        if (projectile.ally) {
+            for (const enemy of this.enemies) {
+                if (!enemy.alive) continue;
+                const dx = enemy.x - projectile.x;
+                const dy = enemy.root.position.y - projectile.y;
+                const distance = Math.hypot(dx, dy);
+                if (distance > radius) continue;
+                const falloff = Math.max(0.28, 1 - distance / radius);
+                const dealt = enemy.role === "shield" ? damage * falloff * 0.75 : damage * falloff;
+                enemy.hp -= dealt;
+                enemy.x += Math.sign(dx || 1) * Math.min(0.8, falloff * 0.8);
+                enemy.root.position.x = enemy.x;
+                if (enemy.hp <= 0) {
+                    this.defeatEnemy(enemy);
+                }
+            }
+            for (const obstacle of this.obstacles) {
+                if (!obstacle.active || !obstacle.destructible) continue;
+                const distance = Math.hypot(obstacle.box.x - projectile.x, obstacle.box.y - projectile.y);
+                if (distance <= radius) {
+                    obstacle.hp -= damage * Math.max(0.35, 1 - distance / radius);
+                    if (obstacle.hp <= 0) {
+                        obstacle.active = false;
+                        obstacle.root.setEnabled(false);
+                        this.spawnCombatFx(obstacle.box.x, obstacle.box.y, "vehicleExplosion");
+                    }
+                }
+            }
+            if (this.boss.active) {
+                const distance = Math.hypot(this.bossRoot.position.x - projectile.x, this.bossRoot.position.y - projectile.y);
+                if (distance <= radius + 1.1) {
+                    this.boss.hp = Math.max(0, this.boss.hp - damage * 0.45);
+                    if (this.boss.hp <= 0) {
+                        this.spawnCombatFx(this.bossRoot.position.x, this.bossRoot.position.y, "vehicleExplosion");
+                        this.spawnCombatFx(this.bossRoot.position.x - 0.9, this.bossRoot.position.y + 0.3, "explosion");
+                        this.spawnCombatFx(this.bossRoot.position.x + 1.0, this.bossRoot.position.y - 0.1, "smoke");
+                        this.player.score += 5000;
+                        this.finish("win");
+                    }
+                }
+            }
+        }
+        else {
+            const box = this.activePlayerBox();
+            const distance = Math.hypot(box.x - projectile.x, box.y - projectile.y);
+            if (distance <= radius) this.damagePlayer();
+        }
+        this.cameraShake = Math.max(this.cameraShake, projectile.behavior === "rocket" ? 0.24 : 0.17);
+    }
     updateProjectiles(dt) {
         const survivors = [];
         for (const projectile of this.projectiles) {
@@ -1842,6 +2340,7 @@ export class GameWorld {
             projectile.x += projectile.vx * dt;
             projectile.y += projectile.vy * dt;
             projectile.mesh.position.set(projectile.x, projectile.y, -0.9);
+            projectile.mesh.rotation.z = projectile.behavior === "grenade" ? this.elapsed * 14 : Math.atan2(projectile.vy, Math.sign(projectile.vx || 1) * Math.max(0.001, Math.abs(projectile.vx)));
             if (projectile.explosive)
                 projectile.mesh.scaling.setAll(1 + (projectile.initialLife - projectile.life) * 0.22);
             else if (projectile.behavior === "flame")
@@ -1864,7 +2363,7 @@ export class GameWorld {
                     if (obstacle.hp <= 0) {
                         obstacle.active = false;
                         obstacle.root.setEnabled(false);
-                        this.spawnCombatFx(obstacle.box.x, obstacle.box.y, "explosion");
+                        this.spawnCombatFx(obstacle.box.x, obstacle.box.y, "vehicleExplosion");
                         this.spawnCombatFx(obstacle.box.x + 0.25, obstacle.box.y + 0.55, "smoke");
                         this.player.score += 700;
                     }
@@ -1879,15 +2378,13 @@ export class GameWorld {
                     const enemyKey = enemy.root.name;
                     if (!projectile.hitTargets.has(enemyKey) && this.overlaps(this.projectileBox(projectile), this.enemyBox(enemy))) {
                         projectile.hitTargets.add(enemyKey);
-                        enemy.hp -= projectile.damage;
+                        const enemyDamage = enemy.role === "shield" && projectile.behavior !== "rocket" ? projectile.damage * 0.45 : projectile.damage;
+                        enemy.hp -= enemyDamage;
                         this.spawnCombatFx(projectile.x, projectile.y, "hit");
                         consumed = !projectile.piercing;
                         if (enemy.hp <= 0) {
-                            enemy.alive = false;
-                            enemy.root.setEnabled(false);
-                            this.spawnCombatFx(enemy.x, enemy.root.position.y, "explosion");
+                            this.defeatEnemy(enemy);
                             this.spawnCombatFx(enemy.x, enemy.root.position.y + 0.55, "smoke");
-                            this.player.score += enemy.kind === "drone" ? 300 : 500;
                         }
                     }
                 }
@@ -1903,9 +2400,11 @@ export class GameWorld {
                     consumed = !projectile.piercing;
                     if (this.boss.hp <= 0) {
                         this.boss.hp = 0;
-                        this.spawnCombatFx(84, -4.0, "explosion");
+                        this.spawnCombatFx(84, -4.0, "vehicleExplosion");
                         this.spawnCombatFx(82.6, -4.6, "explosion");
                         this.spawnCombatFx(85.4, -3.8, "explosion");
+                        this.spawnCombatFx(83.2, -3.2, "smoke");
+                        this.spawnCombatFx(85.8, -4.7, "smoke");
                         this.player.score += 5000;
                         this.finish("win");
                     }
@@ -1918,6 +2417,7 @@ export class GameWorld {
             if (consumed) {
                 if (projectile.explosive && !projectile.detonated) {
                     projectile.detonated = true;
+                    this.applyExplosionDamage(projectile);
                     this.spawnCombatFx(projectile.x, Math.max(-5.55, projectile.y), "explosion");
                     this.audio.sfxPlay("explosion");
                 }
@@ -1990,8 +2490,18 @@ export class GameWorld {
         this.camera.position.x += shakeX;
         this.camera.setTarget(this.camera.position.add(new Vector3(0, 0, 10)));
         this.uiRoot.position.x = this.camera.position.x;
-        this.menuBoard.root.position.x = 0;
-        this.menuBoard.root.position.y = 0.1;
+        if (this.state === "menu") {
+            this.menuBoard.root.position.x = 6.4;
+            this.menuBoard.root.position.y = -0.15;
+        }
+        else if (this.state === "select") {
+            this.menuBoard.root.position.x = 6.4;
+            this.menuBoard.root.position.y = 0.0;
+        }
+        else {
+            this.menuBoard.root.position.x = 0;
+            this.menuBoard.root.position.y = 0.1;
+        }
         this.hudBoard.root.position.x = -8.3;
         this.hudBoard.root.position.y = 6.2;
         this.bossMeter.root.position.x = 5.6;
@@ -2001,9 +2511,9 @@ export class GameWorld {
         this.clearInputs();
         this.projectiles.forEach((projectile) => projectile.mesh.dispose());
         this.projectilePool.forEach((mesh) => mesh.dispose());
-        this.combatFx.forEach((fx) => fx.root.dispose(false, fx.kind === "explosion"));
+        this.combatFx.forEach((fx) => fx.root.dispose(false, fx.kind === "explosion" || fx.kind === "vehicleExplosion" || fx.kind.startsWith("enemyDeath")));
         for (const [kind, roots] of Object.entries(this.combatFxPool))
-            roots.forEach((root) => root.dispose(false, kind === "explosion"));
+            roots.forEach((root) => root.dispose(false, kind === "explosion" || kind === "vehicleExplosion" || kind.startsWith("enemyDeath")));
         this.weaponPickups.forEach((pickup) => pickup.root.dispose());
         this.audio.dispose();
         this.worldRoot.dispose();

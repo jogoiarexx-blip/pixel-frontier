@@ -92,6 +92,17 @@ export function setAssetFrame(root, frame) {
     data.currentFrame = normalized;
     data.texture.uOffset = normalized / data.frameCount;
 }
+
+export function setAssetTint(root, hex = "#ffffff") {
+    const color = Color3.FromHexString(hex);
+    for (const mesh of root?.getChildMeshes?.() ?? []) {
+        const material = mesh.material;
+        if (!material) continue;
+        if (material.diffuseTexture) material.diffuseColor = color;
+        if (material.emissiveTexture) material.emissiveColor = color.scale(0.72);
+    }
+}
+
 export function textBoard(scene, name, width, height, position) {
     const root = new TransformNode(name, scene);
     root.position.set(position.x, position.y, position.z);
